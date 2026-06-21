@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { authRouter } from "./router/auth.ts";
+import { workspaceRouter } from "./router/workspace.ts";
 
 const app = new Hono();
 
@@ -20,6 +21,9 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 
 // Auth Routes
 app.route("/api/v1/auth", authRouter);
+
+// Workspace Routes
+app.route("/api/v1/workspaces", workspaceRouter);
 
 // Future routes will be added here:
 // app.route("/api/v1/users", userRouter);
