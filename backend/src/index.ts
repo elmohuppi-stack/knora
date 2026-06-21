@@ -5,6 +5,8 @@ import { workspaceRouter } from "./router/workspace.ts";
 import { adminRouter } from "./router/admin.ts";
 import { modelRouter } from "./router/model.ts";
 import { documentRouter } from "./router/document.ts";
+import { searchRouter } from "./router/search.ts";
+import { chatRouter } from "./router/chat.ts";
 
 const app = new Hono();
 
@@ -36,6 +38,12 @@ app.route("/api/v1/models", modelRouter);
 
 // Document Routes (Upload, Import)
 app.route("/api/v1/documents", documentRouter);
+
+// Search Routes (Hybrid Search)
+app.route("/api/v1/search", searchRouter);
+
+// Chat Routes (RAG Chat)
+app.route("/api/v1/chat", chatRouter);
 
 // Future routes will be added here:
 // app.route("/api/v1/users", userRouter);

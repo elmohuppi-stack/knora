@@ -132,12 +132,20 @@ documentRouter.delete("/:id", async (c) => {
 
 // --- Hintergrund-Verarbeitung ---
 
-async function scheduleChunking(docId: string, workspaceId: string, text: string) {
+async function scheduleChunking(
+  docId: string,
+  workspaceId: string,
+  text: string,
+) {
   try {
     await documentService.updateDocumentStatus(docId, "processing");
 
     if (!text || text.trim().length === 0) {
-      await documentService.updateDocumentStatus(docId, "failed", "No text could be extracted");
+      await documentService.updateDocumentStatus(
+        docId,
+        "failed",
+        "No text could be extracted",
+      );
       return;
     }
 
@@ -148,6 +156,16 @@ async function scheduleChunking(docId: string, workspaceId: string, text: string
 
     await documentService.updateDocumentStatus(docId, "completed");
     console.log(`[doc] Parsed ${docId}: ${chunkList.length} chunks`);
+
+    // Embedding im Hintergrund starten (nicht-blockierend)
+    try {
+      const { embedWorkspaceChunks } = await import("../service/embedding.ts");
+      embedWorkspaceChunks(workspaceId).then((r) =>
+        console.log(`[doc] Embedded ${r.processed} chunks for doc ${docId}`)
+      );
+    } catch (e: any) {
+      console.warn(`[doc] Embedding trigger failed:`, e.message);
+    }
   } catch (e: any) {
     console.error(`[doc] Parse error ${docId}:`, e.message);
     await documentService.updateDocumentStatus(docId, "failed", e.message);
