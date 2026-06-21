@@ -40,7 +40,11 @@ export async function createProvider(data: {
       is_active: data.is_active ?? true,
     })
     .returning();
-  return { ...provider, api_key_preview: maskKey(provider.api_key_encrypted), api_key_encrypted: undefined };
+  return {
+    ...provider,
+    api_key_preview: maskKey(provider.api_key_encrypted),
+    api_key_encrypted: undefined,
+  };
 }
 
 export async function updateProvider(
@@ -68,7 +72,11 @@ export async function updateProvider(
     .where(eq(modelProviders.id, id))
     .returning();
   if (!provider) return null;
-  return { ...provider, api_key_preview: maskKey(provider.api_key_encrypted), api_key_encrypted: undefined };
+  return {
+    ...provider,
+    api_key_preview: maskKey(provider.api_key_encrypted),
+    api_key_encrypted: undefined,
+  };
 }
 
 export async function deleteProvider(id: string) {

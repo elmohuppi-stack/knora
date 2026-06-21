@@ -4,6 +4,7 @@ import { authRouter } from "./router/auth.ts";
 import { workspaceRouter } from "./router/workspace.ts";
 import { adminRouter } from "./router/admin.ts";
 import { modelRouter } from "./router/model.ts";
+import { documentRouter } from "./router/document.ts";
 
 const app = new Hono();
 
@@ -32,6 +33,9 @@ app.route("/api/v1/admin", adminRouter);
 
 // Model Provider Routes
 app.route("/api/v1/models", modelRouter);
+
+// Document Routes (Upload, Import)
+app.route("/api/v1/documents", documentRouter);
 
 // Future routes will be added here:
 // app.route("/api/v1/users", userRouter);
