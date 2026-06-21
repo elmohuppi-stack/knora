@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { authRouter } from "./router/auth.ts";
 import { workspaceRouter } from "./router/workspace.ts";
+import { adminRouter } from "./router/admin.ts";
+import { modelRouter } from "./router/model.ts";
 
 const app = new Hono();
 
@@ -24,6 +26,12 @@ app.route("/api/v1/auth", authRouter);
 
 // Workspace Routes
 app.route("/api/v1/workspaces", workspaceRouter);
+
+// Admin Routes (User-Management)
+app.route("/api/v1/admin", adminRouter);
+
+// Model Provider Routes
+app.route("/api/v1/models", modelRouter);
 
 // Future routes will be added here:
 // app.route("/api/v1/users", userRouter);

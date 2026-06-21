@@ -67,7 +67,12 @@ export async function createWorkspace(data: {
 
 export async function updateWorkspace(
   id: string,
-  data: { name?: string; description?: string; chunk_size?: number; chunk_overlap?: number },
+  data: {
+    name?: string;
+    description?: string;
+    chunk_size?: number;
+    chunk_overlap?: number;
+  },
 ) {
   const [workspace] = await db
     .update(workspaces)
@@ -92,7 +97,11 @@ export async function listMembers(workspaceId: string) {
   return rows;
 }
 
-export async function addMember(workspaceId: string, userId: number, role: string = "viewer") {
+export async function addMember(
+  workspaceId: string,
+  userId: number,
+  role: string = "viewer",
+) {
   const [member] = await db
     .insert(workspaceMembers)
     .values({

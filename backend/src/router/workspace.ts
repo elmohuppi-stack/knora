@@ -76,12 +76,16 @@ workspaceRouter.get("/:id/members", async (c) => {
 });
 
 // Mitglied hinzufügen
-workspaceRouter.post("/:id/members", zValidator("json", memberSchema), async (c) => {
-  const id = c.req.param("id");
-  const { user_id, role } = c.req.valid("json");
-  const member = await workspaceService.addMember(id, user_id, role);
-  return c.json({ member }, 201);
-});
+workspaceRouter.post(
+  "/:id/members",
+  zValidator("json", memberSchema),
+  async (c) => {
+    const id = c.req.param("id");
+    const { user_id, role } = c.req.valid("json");
+    const member = await workspaceService.addMember(id, user_id, role);
+    return c.json({ member }, 201);
+  },
+);
 
 // Mitglied entfernen
 workspaceRouter.delete("/:id/members/:userId", async (c) => {
