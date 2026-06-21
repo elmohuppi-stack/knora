@@ -6,7 +6,12 @@ import { eq, and, like, or, desc, sql } from "drizzle-orm";
 
 export async function listPages(
   workspaceId: string,
-  options?: { page_type?: string; query?: string; page?: number; page_size?: number },
+  options?: {
+    page_type?: string;
+    query?: string;
+    page?: number;
+    page_size?: number;
+  },
 ) {
   const page = options?.page || 1;
   const pageSize = options?.page_size || 50;
@@ -134,7 +139,10 @@ export async function deletePage(workspaceId: string, slug: string) {
       updated_at: new Date(),
     })
     .where(
-      and(eq(wikiPages.workspace_id, workspaceId), sql`${slug} = ANY(in_links)`),
+      and(
+        eq(wikiPages.workspace_id, workspaceId),
+        sql`${slug} = ANY(in_links)`,
+      ),
     );
 
   await db
@@ -246,7 +254,12 @@ export async function generateWikiPage(
   workspaceId: string,
   documentId: string,
   existingSlugs: string[],
-): Promise<{ slug: string; title: string; summary: string; content: string } | null> {
+): Promise<{
+  slug: string;
+  title: string;
+  summary: string;
+  content: string;
+} | null> {
   // Dokument laden
   const [doc] = await db
     .select()
@@ -289,17 +302,18 @@ export async function generateWikiPage(
   }
 
   // Wiki-Seiten als Kontext für Verlinkungen
-  const existingPages = existingSlugs.length > 0
-    ? await db
-        .select({ slug: wikiPages.slug, title: wikiPages.title })
-        .from(wikiPages)
-        .where(
-          and(
-            eq(wikiPages.workspace_id, workspaceId),
-            sql`${wikiPages.slug} = ANY(${existingSlugs}::text[])`,
-          ),
-        )
-    : [];
+  const existingPages =
+    existingSlugs.length > 0
+      ? await db
+          .select({ slug: wikiPages.slug, title: wikiPages.title })
+          .from(wikiPages)
+          .where(
+            and(
+              eq(wikiPages.workspace_id, workspaceId),
+              sql`${wikiPages.slug} = ANY(${existingSlugs}::text[])`,
+            ),
+          )
+      : [];
 
   const pagesContext = existingPages
     .map((p) => `  - [[${p.slug}|${p.title}]]`)
@@ -356,12 +370,14 @@ ${doc.content.slice(0, 15000)}`;
     // Slug aus Titel generieren
     const titleMatch = content.match(/^#\s+(.+)/m);
     const title = titleMatch ? titleMatch[1].trim() : doc.title;
-    const slug = "wiki/" + title
-      .toLowerCase()
-      .replace(/[^a-z0-9äöüß\s-]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .slice(0, 80);
+    const slug =
+      "wiki/" +
+      title
+        .toLowerCase()
+        .replace(/[^a-z0-9äöüß\s-]/g, "")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .slice(0, 80);
 
     return { slug, title, summary, content };
   } catch (e: any) {

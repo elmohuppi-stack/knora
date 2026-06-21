@@ -3,6 +3,7 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { authMiddleware } from "../middleware/auth.ts";
 import * as documentService from "../service/document.ts";
+import { extractVideoId, fetchYouTubeInfo, buildDocumentContent } from "../service/youtube.ts";
 
 const documentRouter = new Hono();
 documentRouter.use("*", authMiddleware);
@@ -119,6 +120,79 @@ documentRouter.post("/import-url", zValidator("json", urlSchema), async (c) => {
 
   // Asynchron URL laden
   fetchAndParseUrl(doc.id, url);
+
+  return c.json({ document: doc }, 201);
+});
+
+// YouTube-Video importieren
+const youTubeSchema = z.object({
+  workspace_id: z.string().uuid(),
+  url: z.string(),
+});
+
+documentRouter.post("/import-youtube", zValidator("json", youTubeSchema), async (c) => {
+  const user = c.get("user");
+  const { workspace_id, url } = c.req.valid("json");
+
+  const videoId = extractVideoId(url);
+  if (!videoId) {
+    return c.json({ error: "Invalid YouTube URL" }, 400);
+  }
+
+  const info = await fetchYouTubeInfo(videoId);
+  if (!info) {
+    return c.json({ error: "Could not fetch video information" }, 400);
+  }
+
+  const content = buildDocumentContent(info);
+
+  const doc = await documentService.createDocument({
+    id: crypto.randomUUID(),
+    workspace_id,
+    title: info.title,
+    type: "youtube",
+    source: url,
+    source_url: `https://www.youtube.com/watch?v=${videoId}`,
+    content,
+    created_by: user.id,
+  });
+
+  // Wiki-Artikel generieren (async)
+  scheduleChunking(doc.id, workspace_id, content);
+
+  // Wiki-generierung triggern (existierende Slugs holen)
+  try {
+    const { listPages, generateWikiPage, createPage, resolveLinks, updateIncomingLinks } = await import("../service/wiki.ts");
+    const existing = await listPages(workspace_id, { page_size: 200 });
+    const existingSlugs = existing.pages.map((p: any) => p.slug);
+    const wikiResult = await generateWikiPage(workspace_id, doc.id, existingSlugs);
+    if (wikiResult) {
+      let slug = wikiResult.slug;
+      let counter = 1;
+      while (existingSlugs.includes(slug)) { slug = `${wikiResult.slug}-${counter}`; counter++; }
+      const page = await createPage({
+        workspace_id,
+        slug,
+        title: wikiResult.title,
+        content: wikiResult.content,
+        summary: wikiResult.summary,
+        page_type: "article",
+        source_document_id: doc.id,
+        created_by: user.id,
+      });
+      const { out_links } = await resolveLinks(workspace_id, wikiResult.content);
+      if (out_links.length > 0) {
+        try {
+          const { updatePage } = await import("../service/wiki.ts");
+          await updatePage(workspace_id, slug, { out_links });
+          await updateIncomingLinks(workspace_id, slug, out_links);
+        } catch {}
+      }
+      return c.json({ document: doc, wiki_page: { slug: page.slug, title: page.title } }, 201);
+    }
+  } catch (e: any) {
+    console.warn(`[youtube] Wiki generation skipped:`, e.message);
+  }
 
   return c.json({ document: doc }, 201);
 });

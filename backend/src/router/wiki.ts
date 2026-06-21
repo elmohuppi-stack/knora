@@ -49,55 +49,73 @@ wikiRouter.get("/:workspaceId/pages/:slug", async (c) => {
 });
 
 // Wiki-Seite erstellen
-wikiRouter.post("/:workspaceId/pages", zValidator("json", createSchema), async (c) => {
-  const workspaceId = c.req.param("workspaceId");
-  const user = c.get("user");
-  const data = c.req.valid("json");
+wikiRouter.post(
+  "/:workspaceId/pages",
+  zValidator("json", createSchema),
+  async (c) => {
+    const workspaceId = c.req.param("workspaceId");
+    const user = c.get("user");
+    const data = c.req.valid("json");
 
-  // Prüfen ob Slug bereits existiert
-  const existing = await wikiService.getPage(workspaceId, data.slug);
-  if (existing) {
-    return c.json({ error: "Slug already exists" }, 409);
-  }
-
-  const page = await wikiService.createPage({
-    ...data,
-    workspace_id: workspaceId,
-    created_by: user.id,
-  });
-
-  // Links auflösen
-  if (page.content) {
-    const { out_links } = await wikiService.resolveLinks(workspaceId, page.content);
-    if (out_links.length > 0) {
-      await wikiService.updatePage(workspaceId, page.slug, { out_links });
-      await wikiService.updateIncomingLinks(workspaceId, page.slug, out_links);
+    // Prüfen ob Slug bereits existiert
+    const existing = await wikiService.getPage(workspaceId, data.slug);
+    if (existing) {
+      return c.json({ error: "Slug already exists" }, 409);
     }
-  }
 
-  return c.json({ page }, 201);
-});
+    const page = await wikiService.createPage({
+      ...data,
+      workspace_id: workspaceId,
+      created_by: user.id,
+    });
+
+    // Links auflösen
+    if (page.content) {
+      const { out_links } = await wikiService.resolveLinks(
+        workspaceId,
+        page.content,
+      );
+      if (out_links.length > 0) {
+        await wikiService.updatePage(workspaceId, page.slug, { out_links });
+        await wikiService.updateIncomingLinks(
+          workspaceId,
+          page.slug,
+          out_links,
+        );
+      }
+    }
+
+    return c.json({ page }, 201);
+  },
+);
 
 // Wiki-Seite aktualisieren
-wikiRouter.put("/:workspaceId/pages/:slug", zValidator("json", updateSchema), async (c) => {
-  const workspaceId = c.req.param("workspaceId");
-  const slug = decodeURIComponent(c.req.param("slug"));
-  const data = c.req.valid("json");
+wikiRouter.put(
+  "/:workspaceId/pages/:slug",
+  zValidator("json", updateSchema),
+  async (c) => {
+    const workspaceId = c.req.param("workspaceId");
+    const slug = decodeURIComponent(c.req.param("slug"));
+    const data = c.req.valid("json");
 
-  const page = await wikiService.updatePage(workspaceId, slug, data);
-  if (!page) return c.json({ error: "Page not found" }, 404);
+    const page = await wikiService.updatePage(workspaceId, slug, data);
+    if (!page) return c.json({ error: "Page not found" }, 404);
 
-  // Bei Content-Änderung: Links neu auflösen
-  if (data.content) {
-    const { out_links } = await wikiService.resolveLinks(workspaceId, data.content);
-    if (out_links.length > 0) {
-      await wikiService.updatePage(workspaceId, slug, { out_links });
-      await wikiService.updateIncomingLinks(workspaceId, slug, out_links);
+    // Bei Content-Änderung: Links neu auflösen
+    if (data.content) {
+      const { out_links } = await wikiService.resolveLinks(
+        workspaceId,
+        data.content,
+      );
+      if (out_links.length > 0) {
+        await wikiService.updatePage(workspaceId, slug, { out_links });
+        await wikiService.updateIncomingLinks(workspaceId, slug, out_links);
+      }
     }
-  }
 
-  return c.json({ page });
-});
+    return c.json({ page });
+  },
+);
 
 // Wiki-Seite löschen
 wikiRouter.delete("/:workspaceId/pages/:slug", async (c) => {
@@ -116,9 +134,19 @@ wikiRouter.post("/:workspaceId/generate/:documentId", async (c) => {
   const existing = await wikiService.listPages(workspaceId, { page_size: 200 });
   const existingSlugs = existing.pages.map((p) => p.slug);
 
-  const result = await wikiService.generateWikiPage(workspaceId, documentId, existingSlugs);
+  const result = await wikiService.generateWikiPage(
+    workspaceId,
+    documentId,
+    existingSlugs,
+  );
   if (!result) {
-    return c.json({ error: "Generation failed - no chat provider configured or document empty" }, 400);
+    return c.json(
+      {
+        error:
+          "Generation failed - no chat provider configured or document empty",
+      },
+      400,
+    );
   }
 
   // Prüfen ob Slug schon existiert -> ggf. anpassen
@@ -140,7 +168,10 @@ wikiRouter.post("/:workspaceId/generate/:documentId", async (c) => {
   });
 
   // Links auflösen
-  const { out_links } = await wikiService.resolveLinks(workspaceId, result.content);
+  const { out_links } = await wikiService.resolveLinks(
+    workspaceId,
+    result.content,
+  );
   if (out_links.length > 0) {
     await wikiService.updatePage(workspaceId, slug, { out_links });
     await wikiService.updateIncomingLinks(workspaceId, slug, out_links);
@@ -161,7 +192,10 @@ wikiRouter.get("/:workspaceId/suggestions", async (c) => {
   const workspaceId = c.req.param("workspaceId");
   const query = c.req.query("q") || "";
 
-  const result = await wikiService.listPages(workspaceId, { query, page_size: 20 });
+  const result = await wikiService.listPages(workspaceId, {
+    query,
+    page_size: 20,
+  });
   return c.json({
     suggestions: result.pages.map((p) => ({
       slug: p.slug,

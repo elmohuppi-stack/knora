@@ -21,6 +21,7 @@
         <div class="header-actions">
           <button class="btn-primary" @click="showUpload = true">📤 Upload</button>
           <button class="btn-primary" @click="showUrl = true">🔗 URL</button>
+          <button class="btn-primary" @click="showYoutube = true">▶️ YouTube</button>
         </div>
       </div>
 
@@ -40,6 +41,17 @@
         </button>
         <p v-if="urlError" class="error">{{ urlError }}</p>
         <button class="btn-secondary" @click="showUrl = false">Schließen</button>
+      </div>
+
+      <!-- YouTube Import -->
+      <div v-if="showYoutube" class="upload-area">
+        <input v-model="youtubeUrl" placeholder="https://youtube.com/watch?v=..." class="url-input" />
+        <button class="btn-primary" @click="importYoutube" :disabled="!youtubeUrl.trim() || youtubing">
+          {{ youtubing ? '⏳ Importiere...' : 'Importieren' }}
+        </button>
+        <p v-if="youtubeInfo" class="success">▶️ {{ youtubeInfo }}</p>
+        <p v-if="youtubeError" class="error">{{ youtubeError }}</p>
+        <button class="btn-secondary" @click="showYoutube = false; youtubeUrl = ''; youtubeError = ''; youtubeInfo = ''">Schließen</button>
       </div>
 
       <!-- Document List -->
@@ -93,11 +105,16 @@ const docs = ref<any[]>([]);
 const loading = ref(true);
 const showUpload = ref(false);
 const showUrl = ref(false);
+const showYoutube = ref(false);
 const uploading = ref(false);
 const importing = ref(false);
+const youtubing = ref(false);
 const uploadError = ref("");
 const urlError = ref("");
+const youtubeError = ref("");
+const youtubeInfo = ref("");
 const urlInput = ref("");
+const youtubeUrl = ref("");
 
 onMounted(async () => {
   if (!auth.isAuthenticated) { router.push("/login"); return; }
@@ -153,6 +170,29 @@ async function importUrl() {
     urlError.value = e.response?.data?.error || e.message;
   } finally {
     importing.value = false;
+  }
+}
+
+async function importYoutube() {
+  youtubing.value = true;
+  youtubeError.value = "";
+  youtubeInfo.value = "";
+  try {
+    const res = await axios.post("/api/v1/documents/import-youtube", {
+      workspace_id: workspaceId,
+      url: youtubeUrl.value,
+    });
+    youtubeInfo.value = `✅ ${res.data.document.title}`;
+    if (res.data.wiki_page) {
+      youtubeInfo.value += ` 📖 Wiki: "${res.data.wiki_page.title}"`;
+    }
+    showYoutube.value = false;
+    youtubeUrl.value = "";
+    await loadDocs();
+  } catch (e: any) {
+    youtubeError.value = e.response?.data?.error || e.message;
+  } finally {
+    youtubing.value = false;
   }
 }
 
