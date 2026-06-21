@@ -94,7 +94,8 @@ chatRouter.post("/", zValidator("json", chatSchema), async (c) => {
   if (provider) {
     reply = await callLLM(provider, message, context);
   } else {
-    reply = "Kein Chat-Provider konfiguriert. Bitte im Admin einen Provider anlegen.";
+    reply =
+      "Kein Chat-Provider konfiguriert. Bitte im Admin einen Provider anlegen.";
   }
 
   // Assistant-Antwort speichern

@@ -58,7 +58,9 @@ async function callEmbeddingAPI(
     });
 
     if (!response.ok) {
-      console.warn(`[embed] API error: ${response.status} ${await response.text()}`);
+      console.warn(
+        `[embed] API error: ${response.status} ${await response.text()}`,
+      );
       return null;
     }
 
@@ -82,13 +84,16 @@ export async function embedChunk(chunkId: string, content: string) {
 
   try {
     // pgvector erwartet ein JSON-Array oder einen String im PostgreSQL-Format
-    await db.execute(
-      `UPDATE chunks SET embedding = $1::vector WHERE id = $2`,
-      [`[${vector.join(",")}]`, chunkId],
-    );
+    await db.execute(`UPDATE chunks SET embedding = $1::vector WHERE id = $2`, [
+      `[${vector.join(",")}]`,
+      chunkId,
+    ]);
     return true;
   } catch (e: any) {
-    console.error(`[embed] Failed to save embedding for chunk ${chunkId}:`, e.message);
+    console.error(
+      `[embed] Failed to save embedding for chunk ${chunkId}:`,
+      e.message,
+    );
     return false;
   }
 }
@@ -98,12 +103,7 @@ export async function embedWorkspaceChunks(workspaceId: string) {
   const unembedded = await db
     .select({ id: chunks.id, content: chunks.content })
     .from(chunks)
-    .where(
-      and(
-        eq(chunks.workspace_id, workspaceId),
-        isNull(chunks.embedding),
-      ),
-    )
+    .where(and(eq(chunks.workspace_id, workspaceId), isNull(chunks.embedding)))
     .limit(50);
 
   if (unembedded.length === 0) return { processed: 0 };
@@ -116,7 +116,9 @@ export async function embedWorkspaceChunks(workspaceId: string) {
     await new Promise((r) => setTimeout(r, 200));
   }
 
-  console.log(`[embed] Embedded ${successCount}/${unembedded.length} chunks in workspace ${workspaceId}`);
+  console.log(
+    `[embed] Embedded ${successCount}/${unembedded.length} chunks in workspace ${workspaceId}`,
+  );
   return { processed: successCount, total: unembedded.length };
 }
 

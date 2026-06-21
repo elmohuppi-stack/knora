@@ -161,7 +161,7 @@ async function scheduleChunking(
     try {
       const { embedWorkspaceChunks } = await import("../service/embedding.ts");
       embedWorkspaceChunks(workspaceId).then((r) =>
-        console.log(`[doc] Embedded ${r.processed} chunks for doc ${docId}`)
+        console.log(`[doc] Embedded ${r.processed} chunks for doc ${docId}`),
       );
     } catch (e: any) {
       console.warn(`[doc] Embedding trigger failed:`, e.message);
