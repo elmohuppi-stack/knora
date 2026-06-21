@@ -65,7 +65,7 @@ stop: ## 🛑 Docker-Services stoppen
 
 dev: ## 🔥 Backend starten (Bun, Port 3000, Hot-Reload)
 	@echo "🔥 Starte Backend auf http://localhost:3000 ..."
-	$(BUN) run --cwd backend dev
+	cd backend && $(BUN) run dev
 
 dev-frontend: ## 💻 Frontend starten (Vite, Port 5173, HMR)
 	@echo "💻 Starte Frontend auf http://localhost:5173 ..."
