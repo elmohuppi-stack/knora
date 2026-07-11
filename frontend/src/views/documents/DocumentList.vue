@@ -5,53 +5,107 @@
       <nav class="sidebar-nav">
         <router-link to="/chat" class="nav-item">💬 Chat</router-link>
         <router-link to="/wiki" class="nav-item">📖 Wiki</router-link>
-        <router-link to="/workspaces" class="nav-item">📁 Workspaces</router-link>
-        <router-link to="/admin" class="nav-item" v-if="auth.isAdmin">⚙️ Admin</router-link>
+        <router-link to="/workspaces" class="nav-item"
+          >📁 Workspaces</router-link
+        >
+        <router-link to="/admin" class="nav-item" v-if="auth.isAdmin"
+          >⚙️ Admin</router-link
+        >
       </nav>
       <div class="sidebar-footer">
         <span>{{ auth.userName }}</span>
-        <button @click="auth.logout(); $router.push('/login')" class="logout-btn">Abmelden</button>
+        <button
+          @click="
+            auth.logout();
+            $router.push('/login');
+          "
+          class="logout-btn"
+        >
+          Abmelden
+        </button>
       </div>
     </aside>
 
     <main class="main-content">
       <div class="header">
-        <router-link :to="'/workspaces/' + workspaceId" class="back-link">← Workspace</router-link>
+        <router-link :to="'/workspaces/' + workspaceId" class="back-link"
+          >← Workspace</router-link
+        >
         <h3>📄 Dokumente</h3>
         <div class="header-actions">
-          <button class="btn-primary" @click="showUpload = true">📤 Upload</button>
+          <button class="btn-primary" @click="showUpload = true">
+            📤 Upload
+          </button>
           <button class="btn-primary" @click="showUrl = true">🔗 URL</button>
-          <button class="btn-primary" @click="showYoutube = true">▶️ YouTube</button>
+          <button class="btn-primary" @click="showYoutube = true">
+            ▶️ YouTube
+          </button>
         </div>
       </div>
 
       <!-- Upload Area -->
       <div v-if="showUpload" class="upload-area">
-        <input type="file" ref="fileInput" @change="uploadFile" accept=".pdf,.docx,.md,.txt,.html,.csv" class="file-input" />
+        <input
+          type="file"
+          ref="fileInput"
+          @change="uploadFile"
+          accept=".pdf,.docx,.md,.txt,.html,.csv"
+          class="file-input"
+        />
         <p v-if="uploading">📤 Lädt hoch...</p>
         <p v-if="uploadError" class="error">{{ uploadError }}</p>
-        <button class="btn-secondary" @click="showUpload = false" v-if="!uploading">Schließen</button>
+        <button
+          class="btn-secondary"
+          @click="showUpload = false"
+          v-if="!uploading"
+        >
+          Schließen
+        </button>
       </div>
 
       <!-- URL Import -->
       <div v-if="showUrl" class="upload-area">
         <input v-model="urlInput" placeholder="https://..." class="url-input" />
-        <button class="btn-primary" @click="importUrl" :disabled="!urlInput.trim() || importing">
-          {{ importing ? '⏳ Importiere...' : 'Importieren' }}
+        <button
+          class="btn-primary"
+          @click="importUrl"
+          :disabled="!urlInput.trim() || importing"
+        >
+          {{ importing ? "⏳ Importiere..." : "Importieren" }}
         </button>
         <p v-if="urlError" class="error">{{ urlError }}</p>
-        <button class="btn-secondary" @click="showUrl = false">Schließen</button>
+        <button class="btn-secondary" @click="showUrl = false">
+          Schließen
+        </button>
       </div>
 
       <!-- YouTube Import -->
       <div v-if="showYoutube" class="upload-area">
-        <input v-model="youtubeUrl" placeholder="https://youtube.com/watch?v=..." class="url-input" />
-        <button class="btn-primary" @click="importYoutube" :disabled="!youtubeUrl.trim() || youtubing">
-          {{ youtubing ? '⏳ Importiere...' : 'Importieren' }}
+        <input
+          v-model="youtubeUrl"
+          placeholder="https://youtube.com/watch?v=..."
+          class="url-input"
+        />
+        <button
+          class="btn-primary"
+          @click="importYoutube"
+          :disabled="!youtubeUrl.trim() || youtubing"
+        >
+          {{ youtubing ? "⏳ Importiere..." : "Importieren" }}
         </button>
         <p v-if="youtubeInfo" class="success">▶️ {{ youtubeInfo }}</p>
         <p v-if="youtubeError" class="error">{{ youtubeError }}</p>
-        <button class="btn-secondary" @click="showYoutube = false; youtubeUrl = ''; youtubeError = ''; youtubeInfo = ''">Schließen</button>
+        <button
+          class="btn-secondary"
+          @click="
+            showYoutube = false;
+            youtubeUrl = '';
+            youtubeError = '';
+            youtubeInfo = '';
+          "
+        >
+          Schließen
+        </button>
       </div>
 
       <!-- Document List -->
@@ -59,20 +113,29 @@
         <div v-if="loading" class="loading">Lade Dokumente...</div>
 
         <div v-else-if="docs.length === 0" class="empty">
-          <p>Noch keine Dokumente. Lade eine Datei hoch oder importiere eine URL.</p>
+          <p>
+            Noch keine Dokumente. Lade eine Datei hoch oder importiere eine URL.
+          </p>
         </div>
 
         <table v-else class="table">
           <thead>
             <tr>
-              <th>Titel</th><th>Typ</th><th>Chunks</th><th>Status</th><th>Hochgeladen</th><th></th>
+              <th>Titel</th>
+              <th>Typ</th>
+              <th>Chunks</th>
+              <th>Status</th>
+              <th>Hochgeladen</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="doc in docs" :key="doc.id">
               <td class="doc-title">{{ doc.title }}</td>
-              <td><span class="type-badge">{{ doc.type }}</span></td>
-              <td>{{ doc.chunk_count || '-' }}</td>
+              <td>
+                <span class="type-badge">{{ doc.type }}</span>
+              </td>
+              <td>{{ doc.chunk_count || "-" }}</td>
               <td>
                 <span :class="['status', doc.parse_status]">
                   {{ statusLabel(doc.parse_status) }}
@@ -80,7 +143,9 @@
               </td>
               <td class="date">{{ formatDate(doc.created_at) }}</td>
               <td>
-                <button class="btn-danger-sm" @click="deleteDoc(doc.id)">✕</button>
+                <button class="btn-danger-sm" @click="deleteDoc(doc.id)">
+                  ✕
+                </button>
               </td>
             </tr>
           </tbody>
@@ -117,8 +182,14 @@ const urlInput = ref("");
 const youtubeUrl = ref("");
 
 onMounted(async () => {
-  if (!auth.isAuthenticated) { router.push("/login"); return; }
-  if (!workspaceId) { router.push("/workspaces"); return; }
+  if (!auth.isAuthenticated) {
+    router.push("/login");
+    return;
+  }
+  if (!workspaceId) {
+    router.push("/workspaces");
+    return;
+  }
   await loadDocs();
 });
 
@@ -207,12 +278,21 @@ async function deleteDoc(id: string) {
 }
 
 function statusLabel(s: string) {
-  const map: Record<string, string> = { pending: "Ausstehend", processing: "Verarbeite...", completed: "✅ Fertig", failed: "❌ Fehler" };
+  const map: Record<string, string> = {
+    pending: "Ausstehend",
+    processing: "Verarbeite...",
+    completed: "✅ Fertig",
+    failed: "❌ Fehler",
+  };
   return map[s] || s;
 }
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return new Date(dateStr).toLocaleDateString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 }
 </script>
 
@@ -255,7 +335,10 @@ function formatDate(dateStr: string) {
 .btn-secondary { padding: 0.5rem 1rem; background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.9rem; cursor: pointer; }
 .btn-danger-sm { padding: 0.25rem 0.5rem; background: none; border: 1px solid #f44336; color: #f44336; border-radius: 4px; font-size: 0.8rem; cursor: pointer; }
 .error { color: #d32f2f; font-size: 0.875rem; }
-</style>
+}
+.sidebar {
+  width: var(--sidebar-width);
+  background: var(--color-bg-secondary);
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;

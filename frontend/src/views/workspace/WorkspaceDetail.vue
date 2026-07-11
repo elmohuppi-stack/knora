@@ -206,49 +206,5 @@ function formatDate(dateStr: string) {
 .field textarea { min-height: 80px; resize: vertical; }
 .dialog-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem; }
 .loading { padding: 2rem; color: var(--color-text-secondary); }
-</style>
-  flex-direction: column;
-}
-.sidebar-header {
-  padding: 1rem;
-  border-bottom: 1px solid var(--color-border);
-}
-.sidebar-nav {
-  flex: 1;
-  padding: 0.5rem;
-}
-.nav-item {
-  display: block;
-  padding: 0.625rem 0.75rem;
-  border-radius: 6px;
-  color: var(--color-text);
-  margin-bottom: 0.25rem;
-}
-.nav-item:hover,
-.nav-item.active {
-  background: var(--color-bg);
-  text-decoration: none;
-}
-.sidebar-footer {
-  padding: 1rem;
-  border-top: 1px solid var(--color-border);
-  font-size: 0.875rem;
-}
-.logout-btn {
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  font-size: 0.8rem;
-  margin-left: 0.5rem;
-}
-.main-content {
-  flex: 1;
-}
-.header {
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid var(--color-border);
-}
-.content {
-  padding: 2rem 1.5rem;
-}
+
 </style>

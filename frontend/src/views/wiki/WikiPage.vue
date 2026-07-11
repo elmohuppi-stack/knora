@@ -5,28 +5,46 @@
       <nav class="sidebar-nav">
         <router-link to="/chat" class="nav-item">💬 Chat</router-link>
         <router-link to="/wiki" class="nav-item active">📖 Wiki</router-link>
-        <router-link to="/workspaces" class="nav-item">📁 Workspaces</router-link>
-        <router-link to="/admin" class="nav-item" v-if="auth.isAdmin">⚙️ Admin</router-link>
+        <router-link to="/workspaces" class="nav-item"
+          >📁 Workspaces</router-link
+        >
+        <router-link to="/admin" class="nav-item" v-if="auth.isAdmin"
+          >⚙️ Admin</router-link
+        >
       </nav>
       <div class="sidebar-footer">
         <span>{{ auth.userName }}</span>
-        <button @click="auth.logout(); $router.push('/login')" class="logout-btn">Abmelden</button>
+        <button
+          @click="
+            auth.logout();
+            $router.push('/login');
+          "
+          class="logout-btn"
+        >
+          Abmelden
+        </button>
       </div>
     </aside>
 
     <main class="wiki-content">
       <div class="wiki-header">
-        <router-link :to="'/wiki/' + workspaceId" class="back-link">← Übersicht</router-link>
-        <h3 v-if="!editing">{{ page?.title || 'Lädt...' }}</h3>
+        <router-link :to="'/wiki/' + workspaceId" class="back-link"
+          >← Übersicht</router-link
+        >
+        <h3 v-if="!editing">{{ page?.title || "Lädt..." }}</h3>
         <div class="header-actions" v-if="page">
-          <button class="btn-secondary" @click="editing = !editing">{{ editing ? '🔍 Vorschau' : '✏️ Bearbeiten' }}</button>
+          <button class="btn-secondary" @click="editing = !editing">
+            {{ editing ? "🔍 Vorschau" : "✏️ Bearbeiten" }}
+          </button>
           <button class="btn-danger-sm" @click="deletePage">Löschen</button>
         </div>
       </div>
 
       <div v-if="!page && !loading" class="wiki-empty">
         <p>Seite nicht gefunden.</p>
-        <router-link :to="'/wiki/' + workspaceId" class="back-link">Zurück zur Übersicht</router-link>
+        <router-link :to="'/wiki/' + workspaceId" class="back-link"
+          >Zurück zur Übersicht</router-link
+        >
       </div>
 
       <div v-if="loading" class="wiki-loading">Lade Seite...</div>
@@ -47,25 +65,41 @@
         </div>
         <div class="edit-actions">
           <button class="btn-primary" @click="savePage">💾 Speichern</button>
-          <button class="btn-secondary" @click="editing = false">Abbrechen</button>
+          <button class="btn-secondary" @click="editing = false">
+            Abbrechen
+          </button>
         </div>
       </div>
 
       <!-- View Mode -->
       <div v-if="page && !editing" class="wiki-article">
-        <div class="article-summary" v-if="page.summary">{{ page.summary }}</div>
+        <div class="article-summary" v-if="page.summary">
+          {{ page.summary }}
+        </div>
         <div class="article-content" v-html="renderedContent"></div>
         <div class="article-footer">
           <div v-if="page.out_links?.length" class="links-section">
             <h4>→ Verlinkt zu</h4>
             <div class="link-chips">
-              <router-link v-for="slug in page.out_links" :key="slug" :to="`/wiki/${workspaceId}/${encodeURIComponent(slug)}`" class="link-chip">{{ slug.split('/').pop() }}</router-link>
+              <router-link
+                v-for="slug in page.out_links"
+                :key="slug"
+                :to="`/wiki/${workspaceId}/${encodeURIComponent(slug)}`"
+                class="link-chip"
+                >{{ slug.split("/").pop() }}</router-link
+              >
             </div>
           </div>
           <div v-if="page.in_links?.length" class="links-section">
             <h4>← Verlinkt von</h4>
             <div class="link-chips">
-              <router-link v-for="slug in page.in_links" :key="slug" :to="`/wiki/${workspaceId}/${encodeURIComponent(slug)}`" class="link-chip">{{ slug.split('/').pop() }}</router-link>
+              <router-link
+                v-for="slug in page.in_links"
+                :key="slug"
+                :to="`/wiki/${workspaceId}/${encodeURIComponent(slug)}`"
+                class="link-chip"
+                >{{ slug.split("/").pop() }}</router-link
+              >
             </div>
           </div>
           <div class="page-meta">
@@ -102,52 +136,78 @@ const editContent = ref("");
 const renderedContent = computed(() => {
   if (!page.value?.content) return "";
   // Wiki-Links [[slug|text]] in HTML-Links umwandeln
-  let html = page.value.content.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_: string, slug: string, text?: string) => {
-    const label = text || slug.split('/').pop() || slug;
-    return `<a href="/wiki/${workspaceId}/${encodeURIComponent(slug)}" class="wiki-link">${label}</a>`;
-  });
+  let html = page.value.content.replace(
+    /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+    (_: string, slug: string, text?: string) => {
+      const label = text || slug.split("/").pop() || slug;
+      return `<a href="/wiki/${workspaceId}/${encodeURIComponent(slug)}" class="wiki-link">${label}</a>`;
+    },
+  );
   const parsed = marked.parse(html, { async: false }) as string;
   return DOMPurify.sanitize(parsed);
 });
 
 onMounted(async () => {
-  if (!auth.isAuthenticated) { router.push("/login"); return; }
+  if (!auth.isAuthenticated) {
+    router.push("/login");
+    return;
+  }
   await loadPage();
 });
 
 async function loadPage() {
   loading.value = true;
   try {
-    const res = await axios.get(`/api/v1/wiki/${workspaceId}/pages/${encodeURIComponent(pageSlug)}`);
+    const res = await axios.get(
+      `/api/v1/wiki/${workspaceId}/pages/${encodeURIComponent(pageSlug)}`,
+    );
     page.value = res.data.page;
     editTitle.value = page.value.title;
     editSummary.value = page.value.summary;
     editContent.value = page.value.content;
-  } catch { page.value = null; }
-  finally { loading.value = false; }
+  } catch {
+    page.value = null;
+  } finally {
+    loading.value = false;
+  }
 }
 
 async function savePage() {
   try {
-    const res = await axios.put(`/api/v1/wiki/${workspaceId}/pages/${encodeURIComponent(pageSlug)}`, {
-      title: editTitle.value,
-      summary: editSummary.value,
-      content: editContent.value,
-    });
+    const res = await axios.put(
+      `/api/v1/wiki/${workspaceId}/pages/${encodeURIComponent(pageSlug)}`,
+      {
+        title: editTitle.value,
+        summary: editSummary.value,
+        content: editContent.value,
+      },
+    );
     page.value = res.data.page;
     editing.value = false;
-  } catch (e: any) { alert("Fehler: " + (e.response?.data?.error || e.message)); }
+  } catch (e: any) {
+    alert("Fehler: " + (e.response?.data?.error || e.message));
+  }
 }
 
 async function deletePage() {
   if (!confirm("Seite löschen?")) return;
   try {
-    await axios.delete(`/api/v1/wiki/${workspaceId}/pages/${encodeURIComponent(pageSlug)}`);
+    await axios.delete(
+      `/api/v1/wiki/${workspaceId}/pages/${encodeURIComponent(pageSlug)}`,
+    );
     router.push(`/wiki/${workspaceId}`);
-  } catch { alert("Fehler beim Löschen"); }
+  } catch {
+    alert("Fehler beim Löschen");
+  }
 }
 
-function formatDate(d: string) { return new Date(d).toLocaleDateString("de-DE", { day:"2-digit", month:"2-digit", year:"numeric" }); }
+function formatDate(d: string) {
+  return new Date(d).toLocaleDateString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
 </script>
 
 <style scoped>
@@ -197,67 +257,4 @@ function formatDate(d: string) { return new Date(d).toLocaleDateString("de-DE", 
 .btn-primary { padding: 0.5rem 1rem; background: var(--color-primary); color: white; border: none; border-radius: 6px; font-size: 0.9rem; cursor: pointer; }
 .btn-secondary { padding: 0.5rem 1rem; background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.9rem; cursor: pointer; }
 .btn-danger-sm { padding: 0.25rem 0.5rem; background: none; border: 1px solid #f44336; color: #f44336; border-radius: 4px; font-size: 0.8rem; cursor: pointer; }
-</style>
-</script>
-
-<style scoped>
-.wiki-page-layout {
-  display: flex;
-  height: 100vh;
-}
-.sidebar {
-  width: var(--sidebar-width);
-  background: var(--color-bg-secondary);
-  border-right: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-}
-.sidebar-header {
-  padding: 1rem;
-  border-bottom: 1px solid var(--color-border);
-}
-.sidebar-nav {
-  flex: 1;
-  padding: 0.5rem;
-}
-.nav-item {
-  display: block;
-  padding: 0.625rem 0.75rem;
-  border-radius: 6px;
-  color: var(--color-text);
-  margin-bottom: 0.25rem;
-}
-.nav-item:hover,
-.nav-item.active {
-  background: var(--color-bg);
-  text-decoration: none;
-}
-.sidebar-footer {
-  padding: 1rem;
-  border-top: 1px solid var(--color-border);
-  font-size: 0.875rem;
-}
-.logout-btn {
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  font-size: 0.8rem;
-  margin-left: 0.5rem;
-}
-.wiki-content {
-  flex: 1;
-}
-.wiki-header {
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid var(--color-border);
-}
-.back-link {
-  font-size: 0.875rem;
-  color: var(--color-primary);
-}
-.wiki-empty {
-  padding: 4rem 1.5rem;
-  text-align: center;
-  color: var(--color-text-secondary);
-}
 </style>

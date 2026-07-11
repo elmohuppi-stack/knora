@@ -126,7 +126,9 @@ body {
   color: var(--color-sidebar-text);
   text-decoration: none;
   font-size: 0.925rem;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .nav-item:hover {
@@ -194,5 +196,4 @@ button {
   cursor: pointer;
   font-family: inherit;
 }
-</style>
 </style>
