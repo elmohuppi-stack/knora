@@ -7,6 +7,11 @@ import jwt from "jsonwebtoken";
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const SALT_ROUNDS = 12;
 
+// Admin-Credentials aus .env
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@knora.app";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+const ADMIN_NAME = process.env.ADMIN_NAME || "Admin";
+
 export async function register(email: string, password: string, name: string) {
   const existing = await db
     .select()
@@ -35,14 +40,27 @@ export async function register(email: string, password: string, name: string) {
       email: user.email,
       name: user.name,
       role: user.role,
-      created_at: user.created_at.toISOString(),
-      updated_at: user.updated_at.toISOString(),
     },
     token,
   };
 }
 
 export async function login(email: string, password: string) {
+  // 1. Prüfe zuerst Admin-Credentials aus .env
+  if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+    const token = createToken({
+      id: 0,
+      email: ADMIN_EMAIL,
+      name: ADMIN_NAME,
+      role: "admin",
+    });
+    return {
+      user: { id: 0, email: ADMIN_EMAIL, name: ADMIN_NAME, role: "admin" },
+      token,
+    };
+  }
+
+  // 2. Fallback: DB-User (für zukünftige Multi-User-Szenarien)
   const [user] = await db
     .select()
     .from(users)
@@ -64,8 +82,6 @@ export async function login(email: string, password: string) {
       email: user.email,
       name: user.name,
       role: user.role,
-      created_at: user.created_at.toISOString(),
-      updated_at: user.updated_at.toISOString(),
     },
     token,
   };

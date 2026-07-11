@@ -1,32 +1,5 @@
 <template>
-  <div class="wiki-page-layout">
-    <aside class="sidebar">
-      <div class="sidebar-header"><h2>Wiki-Chat</h2></div>
-      <nav class="sidebar-nav">
-        <router-link to="/chat" class="nav-item">💬 Chat</router-link>
-        <router-link to="/wiki" class="nav-item active">📖 Wiki</router-link>
-        <router-link to="/workspaces" class="nav-item"
-          >📁 Workspaces</router-link
-        >
-        <router-link to="/admin" class="nav-item" v-if="auth.isAdmin"
-          >⚙️ Admin</router-link
-        >
-      </nav>
-      <div class="sidebar-footer">
-        <span>{{ auth.userName }}</span>
-        <button
-          @click="
-            auth.logout();
-            $router.push('/login');
-          "
-          class="logout-btn"
-        >
-          Abmelden
-        </button>
-      </div>
-    </aside>
-
-    <main class="wiki-content">
+  <main class="wiki-content">
       <div class="wiki-header">
         <router-link :to="'/wiki/' + workspaceId" class="back-link"
           >← Übersicht</router-link
@@ -211,50 +184,203 @@ function formatDate(d: string) {
 </script>
 
 <style scoped>
-.wiki-page-layout { display: flex; height: 100vh; }
-.sidebar { width: var(--sidebar-width); background: var(--color-bg-secondary); border-right: 1px solid var(--color-border); display: flex; flex-direction: column; }
-.sidebar-header { padding: 1rem; border-bottom: 1px solid var(--color-border); }
-.sidebar-nav { flex: 1; padding: 0.5rem; }
-.nav-item { display: block; padding: 0.625rem 0.75rem; border-radius: 6px; color: var(--color-text); margin-bottom: 0.25rem; }
-.nav-item:hover, .nav-item.active { background: var(--color-bg); text-decoration: none; }
-.sidebar-footer { padding: 1rem; border-top: 1px solid var(--color-border); font-size: 0.875rem; }
-.logout-btn { background: none; border: none; color: var(--color-text-secondary); font-size: 0.8rem; margin-left: 0.5rem; }
-.wiki-content { flex: 1; overflow-y: auto; }
-.wiki-header { padding: 1rem 1.5rem; border-bottom: 1px solid var(--color-border); display: flex; align-items: center; gap: 1rem; }
-.wiki-header h3 { flex: 1; }
-.header-actions { display: flex; gap: 0.5rem; }
-.back-link { font-size: 0.875rem; color: var(--color-primary); white-space: nowrap; }
-.wiki-empty { padding: 4rem 2rem; text-align: center; color: var(--color-text-secondary); }
-.wiki-loading { padding: 2rem; color: var(--color-text-secondary); }
+.wiki-content {
+  flex: 1;
+  overflow-y: auto;
+}
+.wiki-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.wiki-header h3 {
+  flex: 1;
+}
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.back-link {
+  font-size: 0.875rem;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+.wiki-empty {
+  padding: 4rem 2rem;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+.wiki-loading {
+  padding: 2rem;
+  color: var(--color-text-secondary);
+}
 
-.wiki-article { padding: 1.5rem 2rem; max-width: 800px; }
-.article-summary { font-style: italic; color: var(--color-text-secondary); margin-bottom: 1.5rem; padding: 0.75rem 1rem; background: var(--color-bg-secondary); border-radius: 8px; }
-.article-content :deep(h1) { font-size: 1.75rem; margin: 1.5rem 0 0.75rem; }
-.article-content :deep(h2) { font-size: 1.35rem; margin: 1.25rem 0 0.5rem; border-bottom: 1px solid var(--color-border); padding-bottom: 0.25rem; }
-.article-content :deep(h3) { font-size: 1.1rem; margin: 1rem 0 0.5rem; }
-.article-content :deep(p) { margin-bottom: 0.75rem; line-height: 1.7; }
-.article-content :deep(ul), .article-content :deep(ol) { margin-bottom: 0.75rem; padding-left: 1.5rem; }
-.article-content :deep(blockquote) { border-left: 3px solid var(--color-primary); padding-left: 1rem; margin: 0.75rem 0; color: var(--color-text-secondary); }
-.article-content :deep(code) { background: var(--color-bg-secondary); padding: 0.125rem 0.375rem; border-radius: 3px; font-size: 0.9em; }
-.article-content :deep(pre) { background: #1a1a2e; color: #e0e0e0; padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 0.75rem 0; }
-.article-content :deep(pre code) { background: none; padding: 0; }
-.article-content :deep(.wiki-link) { color: var(--color-primary); font-weight: 500; text-decoration: underline; text-decoration-style: dotted; }
+.wiki-article {
+  padding: 1.5rem 2rem;
+  max-width: 800px;
+}
+.article-summary {
+  font-style: italic;
+  color: var(--color-text-secondary);
+  margin-bottom: 1.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--color-bg-secondary);
+  border-radius: 8px;
+}
+.article-content :deep(h1) {
+  font-size: 1.75rem;
+  margin: 1.5rem 0 0.75rem;
+}
+.article-content :deep(h2) {
+  font-size: 1.35rem;
+  margin: 1.25rem 0 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.25rem;
+}
+.article-content :deep(h3) {
+  font-size: 1.1rem;
+  margin: 1rem 0 0.5rem;
+}
+.article-content :deep(p) {
+  margin-bottom: 0.75rem;
+  line-height: 1.7;
+}
+.article-content :deep(ul),
+.article-content :deep(ol) {
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem;
+}
+.article-content :deep(blockquote) {
+  border-left: 3px solid var(--color-primary);
+  padding-left: 1rem;
+  margin: 0.75rem 0;
+  color: var(--color-text-secondary);
+}
+.article-content :deep(code) {
+  background: var(--color-bg-secondary);
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+.article-content :deep(pre) {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.article-content :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+.article-content :deep(.wiki-link) {
+  color: var(--color-primary);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
 
-.article-footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
-.links-section { margin-bottom: 1rem; }
-.links-section h4 { font-size: 0.8rem; color: var(--color-text-secondary); margin-bottom: 0.375rem; }
-.link-chips { display: flex; gap: 0.375rem; flex-wrap: wrap; }
-.link-chip { font-size: 0.8rem; padding: 0.25rem 0.625rem; background: var(--color-bg-secondary); border-radius: 12px; color: var(--color-primary); text-decoration: none; }
-.link-chip:hover { background: var(--color-primary); color: white; }
-.page-meta { font-size: 0.75rem; color: var(--color-text-secondary); display: flex; gap: 1rem; }
+.article-footer {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+.links-section {
+  margin-bottom: 1rem;
+}
+.links-section h4 {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 0.375rem;
+}
+.link-chips {
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+.link-chip {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.625rem;
+  background: var(--color-bg-secondary);
+  border-radius: 12px;
+  color: var(--color-primary);
+  text-decoration: none;
+}
+.link-chip:hover {
+  background: var(--color-primary);
+  color: white;
+}
+.page-meta {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  display: flex;
+  gap: 1rem;
+}
 
-.wiki-edit { padding: 1.5rem 2rem; max-width: 800px; }
-.field { margin-bottom: 1rem; }
-.field label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem; color: var(--color-text-secondary); }
-.field input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; font-size: 1rem; }
-.editor-textarea { width: 100%; min-height: 400px; padding: 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.9rem; font-family: monospace; line-height: 1.6; resize: vertical; }
-.edit-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
-.btn-primary { padding: 0.5rem 1rem; background: var(--color-primary); color: white; border: none; border-radius: 6px; font-size: 0.9rem; cursor: pointer; }
-.btn-secondary { padding: 0.5rem 1rem; background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.9rem; cursor: pointer; }
-.btn-danger-sm { padding: 0.25rem 0.5rem; background: none; border: 1px solid #f44336; color: #f44336; border-radius: 4px; font-size: 0.8rem; cursor: pointer; }
+.wiki-edit {
+  padding: 1.5rem 2rem;
+  max-width: 800px;
+}
+.field {
+  margin-bottom: 1rem;
+}
+.field label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  color: var(--color-text-secondary);
+}
+.field input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 1rem;
+}
+.editor-textarea {
+  width: 100%;
+  min-height: 400px;
+  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-family: monospace;
+  line-height: 1.6;
+  resize: vertical;
+}
+.edit-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.btn-primary {
+  padding: 0.5rem 1rem;
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.btn-secondary {
+  padding: 0.5rem 1rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.btn-danger-sm {
+  padding: 0.25rem 0.5rem;
+  background: none;
+  border: 1px solid #f44336;
+  color: #f44336;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
 </style>

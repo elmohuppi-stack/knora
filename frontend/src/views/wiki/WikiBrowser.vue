@@ -1,145 +1,113 @@
 <template>
-  <div class="wiki-layout">
-    <aside class="sidebar">
-      <div class="sidebar-header"><h2>Wiki-Chat</h2></div>
-      <nav class="sidebar-nav">
-        <router-link to="/chat" class="nav-item">💬 Chat</router-link>
-        <router-link to="/wiki" class="nav-item active">📖 Wiki</router-link>
-        <router-link to="/workspaces" class="nav-item"
-          >📁 Workspaces</router-link
-        >
-        <router-link to="/admin" class="nav-item" v-if="auth.isAdmin"
-          >⚙️ Admin</router-link
-        >
-      </nav>
-      <div class="sidebar-footer">
-        <span>{{ auth.userName }}</span>
-        <button
-          @click="
-            auth.logout();
-            $router.push('/login');
-          "
-          class="logout-btn"
-        >
-          Abmelden
+  <main class="wiki-main">
+    <div class="wiki-header">
+      <h3>📖 Wiki</h3>
+      <select v-model="workspaceId" @change="loadPages" class="ws-select">
+        <option value="">— Workspace wählen —</option>
+        <option v-for="ws in workspaces" :key="ws.id" :value="ws.id">
+          {{ ws.name }}
+        </option>
+      </select>
+      <div class="header-actions" v-if="workspaceId">
+        <button class="btn-primary" @click="showCreate = true">
+          + Neue Seite
         </button>
       </div>
-    </aside>
+    </div>
 
-    <main class="wiki-main">
-      <div class="wiki-header">
-        <h3>📖 Wiki</h3>
-        <select v-model="workspaceId" @change="loadPages" class="ws-select">
-          <option value="">— Workspace wählen —</option>
-          <option v-for="ws in workspaces" :key="ws.id" :value="ws.id">
-            {{ ws.name }}
-          </option>
-        </select>
-        <div class="header-actions" v-if="workspaceId">
-          <button class="btn-primary" @click="showCreate = true">
-            + Neue Seite
-          </button>
-        </div>
+    <template v-if="workspaceId">
+      <div class="wiki-toolbar">
+        <input
+          v-model="searchQuery"
+          @input="loadPages"
+          placeholder="Wiki durchsuchen..."
+          class="search-input"
+        />
+        <span class="page-count">{{ totalPages }} Seiten</span>
       </div>
-
-      <template v-if="workspaceId">
-        <div class="wiki-toolbar">
-          <input
-            v-model="searchQuery"
-            @input="loadPages"
-            placeholder="Wiki durchsuchen..."
-            class="search-input"
-          />
-          <span class="page-count">{{ totalPages }} Seiten</span>
+      <div class="wiki-content">
+        <div v-if="loading" class="status-text">Lade...</div>
+        <div v-else-if="pages.length === 0" class="status-text">
+          <p>
+            Noch keine Wiki-Seiten. Generiere Seiten aus Dokumenten oder
+            erstelle sie manuell.
+          </p>
         </div>
-        <div class="wiki-content">
-          <div v-if="loading" class="status-text">Lade...</div>
-          <div v-else-if="pages.length === 0" class="status-text">
-            <p>
-              Noch keine Wiki-Seiten. Generiere Seiten aus Dokumenten oder
-              erstelle sie manuell.
-            </p>
-          </div>
-          <div v-else class="page-list">
-            <div
-              v-for="p in pages"
-              :key="p.id"
-              class="page-card"
-              @click="
-                $router.push(
-                  `/wiki/${workspaceId}/${encodeURIComponent(p.slug)}`,
-                )
-              "
-            >
-              <div class="page-type-badge">{{ typeIcon(p.page_type) }}</div>
-              <div class="page-info">
-                <h4>{{ p.title }}</h4>
-                <p class="page-summary">
-                  {{ p.summary || "Keine Zusammenfassung" }}
-                </p>
-                <div class="page-meta">
-                  <span>{{ p.page_type }}</span>
-                  <span>{{ formatDate(p.updated_at) }}</span>
-                  <span v-if="p.out_links?.length"
-                    >{{ p.out_links.length }} →</span
-                  >
-                  <span v-if="p.in_links?.length"
-                    >{{ p.in_links.length }} ←</span
-                  >
-                </div>
+        <div v-else class="page-list">
+          <div
+            v-for="p in pages"
+            :key="p.id"
+            class="page-card"
+            @click="
+              $router.push(`/wiki/${workspaceId}/${encodeURIComponent(p.slug)}`)
+            "
+          >
+            <div class="page-type-badge">{{ typeIcon(p.page_type) }}</div>
+            <div class="page-info">
+              <h4>{{ p.title }}</h4>
+              <p class="page-summary">
+                {{ p.summary || "Keine Zusammenfassung" }}
+              </p>
+              <div class="page-meta">
+                <span>{{ p.page_type }}</span>
+                <span>{{ formatDate(p.updated_at) }}</span>
+                <span v-if="p.out_links?.length"
+                  >{{ p.out_links.length }} →</span
+                >
+                <span v-if="p.in_links?.length">{{ p.in_links.length }} ←</span>
               </div>
             </div>
           </div>
         </div>
-      </template>
-      <div v-else class="wiki-empty">
-        <p>Wähle einen Workspace aus, um dessen Wiki zu durchsuchen.</p>
       </div>
+    </template>
+    <div v-else class="wiki-empty">
+      <p>Wähle einen Workspace aus, um dessen Wiki zu durchsuchen.</p>
+    </div>
 
-      <div
-        v-if="showCreate"
-        class="dialog-overlay"
-        @click.self="showCreate = false"
-      >
-        <div class="dialog">
-          <h3>Neue Wiki-Seite</h3>
-          <div class="field">
-            <label>Titel *</label
-            ><input
-              v-model="form.title"
-              placeholder="Titel"
-              @input="generateSlug"
-            />
-          </div>
-          <div class="field">
-            <label>Slug *</label
-            ><input v-model="form.slug" placeholder="wiki/mein-artikel" />
-          </div>
-          <div class="field">
-            <label>Typ</label>
-            <select v-model="form.page_type">
-              <option value="article">Artikel</option>
-              <option value="entity">Entität</option>
-              <option value="concept">Konzept</option>
-            </select>
-          </div>
-          <div class="dialog-actions">
-            <button class="btn-secondary" @click="showCreate = false">
-              Abbrechen
-            </button>
-            <button
-              class="btn-primary"
-              @click="createPage"
-              :disabled="!form.title || !form.slug"
-            >
-              Erstellen
-            </button>
-          </div>
-          <p v-if="createError" class="error">{{ createError }}</p>
+    <div
+      v-if="showCreate"
+      class="dialog-overlay"
+      @click.self="showCreate = false"
+    >
+      <div class="dialog">
+        <h3>Neue Wiki-Seite</h3>
+        <div class="field">
+          <label>Titel *</label
+          ><input
+            v-model="form.title"
+            placeholder="Titel"
+            @input="generateSlug"
+          />
         </div>
+        <div class="field">
+          <label>Slug *</label
+          ><input v-model="form.slug" placeholder="wiki/mein-artikel" />
+        </div>
+        <div class="field">
+          <label>Typ</label>
+          <select v-model="form.page_type">
+            <option value="article">Artikel</option>
+            <option value="entity">Entität</option>
+            <option value="concept">Konzept</option>
+          </select>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn-secondary" @click="showCreate = false">
+            Abbrechen
+          </button>
+          <button
+            class="btn-primary"
+            @click="createPage"
+            :disabled="!form.title || !form.slug"
+          >
+            Erstellen
+          </button>
+        </div>
+        <p v-if="createError" class="error">{{ createError }}</p>
       </div>
-    </main>
-  </div>
+    </div>
+  </main>
 </template>
 
 <script setup lang="ts">
@@ -231,49 +199,6 @@ function formatDate(d: string) {
 </script>
 
 <style scoped>
-.wiki-layout {
-  display: flex;
-  height: 100vh;
-}
-.sidebar {
-  width: var(--sidebar-width);
-  background: var(--color-bg-secondary);
-  border-right: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-}
-.sidebar-header {
-  padding: 1rem;
-  border-bottom: 1px solid var(--color-border);
-}
-.sidebar-nav {
-  flex: 1;
-  padding: 0.5rem;
-}
-.nav-item {
-  display: block;
-  padding: 0.625rem 0.75rem;
-  border-radius: 6px;
-  color: var(--color-text);
-  margin-bottom: 0.25rem;
-}
-.nav-item:hover,
-.nav-item.active {
-  background: var(--color-bg);
-  text-decoration: none;
-}
-.sidebar-footer {
-  padding: 1rem;
-  border-top: 1px solid var(--color-border);
-  font-size: 0.875rem;
-}
-.logout-btn {
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  font-size: 0.8rem;
-  margin-left: 0.5rem;
-}
 .wiki-main {
   flex: 1;
 }

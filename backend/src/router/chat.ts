@@ -6,6 +6,8 @@ import { hybridSearch } from "../service/search.ts";
 import { db } from "../db/index.ts";
 import { chatSessions, chatMessages, modelProviders } from "../db/schema.ts";
 import { eq, desc, and } from "drizzle-orm";
+import { streamText, createTextStreamResponse } from "ai";
+import { openai } from "@ai-sdk/openai";
 
 const chatRouter = new Hono();
 chatRouter.use("*", authMiddleware);
@@ -16,34 +18,85 @@ const chatSchema = z.object({
   session_id: z.string().uuid().optional(),
 });
 
-// Chat-Nachricht senden (mit RAG)
+// Session helper
+async function getOrCreateSession(
+  userId: number,
+  workspaceId: string | undefined,
+  message: string,
+  sessionId: string | undefined,
+) {
+  if (sessionId) {
+    const sessions = await db
+      .select()
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+    if (sessions[0]) return sessions[0];
+  }
+
+  const [newSession] = await db
+    .insert(chatSessions)
+    .values({
+      id: crypto.randomUUID(),
+      workspace_id: workspaceId || null,
+      user_id: userId,
+      title: message.slice(0, 80),
+    })
+    .returning();
+  return newSession;
+}
+
+// Aktiven LLM-Provider laden
+async function getActiveProvider() {
+  let providers = await db
+    .select()
+    .from(modelProviders)
+    .where(
+      and(
+        eq(modelProviders.is_active, true),
+        eq(modelProviders.provider_type, "chat"),
+      ),
+    )
+    .limit(1);
+
+  if (!providers[0]) {
+    providers = await db
+      .select()
+      .from(modelProviders)
+      .where(
+        and(
+          eq(modelProviders.is_active, true),
+          eq(modelProviders.provider_type, "both"),
+        ),
+      )
+      .limit(1);
+  }
+  return providers[0] || null;
+}
+
+// System-Prompt bauen
+function buildSystemPrompt(context: string): string {
+  if (!context)
+    return "Du bist ein hilfreicher Assistent. Antworte auf Deutsch.";
+  return `Du bist ein hilfreicher Assistent mit Zugriff auf eine Wissensdatenbank.
+Antworte auf Deutsch basierend auf dem folgenden Kontext.
+Wenn die Antwort nicht im Kontext enthalten ist, sag dass du es nicht weißt.
+
+KONTEXT:
+${context}`;
+}
+
+// Nicht-streaming Chat-Nachricht senden (für History-Kompatibilität)
 chatRouter.post("/", zValidator("json", chatSchema), async (c) => {
   const user = c.get("user");
   const { workspace_id, message, session_id } = c.req.valid("json");
 
-  // Session ermitteln oder erstellen
-  let session = session_id ? null : null;
-  if (session_id) {
-    const sessions = await db
-      .select()
-      .from(chatSessions)
-      .where(eq(chatSessions.id, session_id))
-      .limit(1);
-    session = sessions[0] || null;
-  }
-
-  if (!session) {
-    const [newSession] = await db
-      .insert(chatSessions)
-      .values({
-        id: crypto.randomUUID(),
-        workspace_id: workspace_id || null,
-        user_id: user.id,
-        title: message.slice(0, 80),
-      })
-      .returning();
-    session = newSession;
-  }
+  const session = await getOrCreateSession(
+    user.id,
+    workspace_id,
+    message,
+    session_id,
+  );
 
   // User-Nachricht speichern
   await db.insert(chatMessages).values({
@@ -59,36 +112,11 @@ chatRouter.post("/", zValidator("json", chatSchema), async (c) => {
     searchResults = await hybridSearch(workspace_id, message, 5);
   }
 
-  // Prompt mit Kontext bauen
   const context = searchResults
     .map((r) => `[${r.document_title}]: ${r.content}`)
     .join("\n\n");
 
-  const activeProvider = await db
-    .select()
-    .from(modelProviders)
-    .where(
-      and(
-        eq(modelProviders.is_active, true),
-        eq(modelProviders.provider_type, "chat"),
-      ),
-    )
-    .limit(1);
-
-  let provider = activeProvider[0];
-  if (!provider) {
-    const bothProviders = await db
-      .select()
-      .from(modelProviders)
-      .where(
-        and(
-          eq(modelProviders.is_active, true),
-          eq(modelProviders.provider_type, "both"),
-        ),
-      )
-      .limit(1);
-    provider = bothProviders[0];
-  }
+  const provider = await getActiveProvider();
 
   let reply = "";
   if (provider) {
@@ -98,7 +126,6 @@ chatRouter.post("/", zValidator("json", chatSchema), async (c) => {
       "Kein Chat-Provider konfiguriert. Bitte im Admin einen Provider anlegen.";
   }
 
-  // Assistant-Antwort speichern
   const [assistantMsg] = await db
     .insert(chatMessages)
     .values({
@@ -126,6 +153,111 @@ chatRouter.post("/", zValidator("json", chatSchema), async (c) => {
       title: r.document_title,
       score: r.score,
     })),
+  });
+});
+
+// Streaming Chat-Endpunkt (SSE)
+chatRouter.post("/stream", zValidator("json", chatSchema), async (c) => {
+  const user = c.get("user");
+  const { workspace_id, message, session_id } = c.req.valid("json");
+
+  const session = await getOrCreateSession(
+    user.id,
+    workspace_id,
+    message,
+    session_id,
+  );
+
+  // User-Nachricht speichern
+  const userMsgId = crypto.randomUUID();
+  await db.insert(chatMessages).values({
+    id: userMsgId,
+    session_id: session.id,
+    role: "user",
+    content: message,
+  });
+
+  // RAG: Suche nach relevanten Chunks
+  let searchResults: any[] = [];
+  if (workspace_id) {
+    searchResults = await hybridSearch(workspace_id, message, 5);
+  }
+
+  const context = searchResults
+    .map((r) => `[${r.document_title}]: ${r.content}`)
+    .join("\n\n");
+
+  const provider = await getActiveProvider();
+
+  if (!provider) {
+    return c.json({
+      session_id: session.id,
+      message: {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content:
+          "Kein Chat-Provider konfiguriert. Bitte im Admin einen Provider anlegen.",
+        knowledge_refs: [],
+      },
+      sources: [],
+    });
+  }
+
+  // Stream mit Vercel AI SDK
+  const systemPrompt = buildSystemPrompt(context);
+
+  const aiStream = await streamText({
+    model: openai.chat(provider.default_model, {
+      baseURL: provider.api_base_url,
+      apiKey: provider.api_key_encrypted,
+    }),
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: message },
+    ],
+    maxTokens: 1024,
+  });
+
+  // Vollständige Antwort für DB-Speicherung sammeln
+  let fullReply = "";
+
+  // Text-Stream in einen transformierenden Stream verwandeln,
+  // der gleichzeitig den vollständigen Text sammelt
+  const { readable, writable } = new TransformStream<string, string>({
+    transform(chunk, controller) {
+      fullReply += chunk;
+      controller.enqueue(chunk);
+    },
+    flush() {
+      // Nach dem Stream: Antwort in DB speichern
+      db.insert(chatMessages)
+        .values({
+          id: crypto.randomUUID(),
+          session_id: session.id,
+          role: "assistant",
+          content: fullReply,
+          knowledge_refs: searchResults.map((r) => ({
+            chunk_id: r.chunk_id,
+            document_title: r.document_title,
+            score: r.score,
+          })),
+        })
+        .then()
+        .catch(console.error);
+    },
+  });
+
+  // Stream durch den Transform leiten
+  aiStream.textStream.pipeTo(writable).catch(console.error);
+
+  return createTextStreamResponse({
+    stream: readable,
+    headers: {
+      "X-Session-Id": session.id,
+      "X-Sources": JSON.stringify(
+        searchResults.map((r) => ({ title: r.document_title, score: r.score })),
+      ),
+    },
   });
 });
 

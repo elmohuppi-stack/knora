@@ -1,87 +1,53 @@
 <template>
-  <div class="chat-layout">
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <h2>Wiki-Chat</h2>
-      </div>
-      <nav class="sidebar-nav">
-        <router-link to="/chat" class="nav-item active">💬 Chat</router-link>
-        <router-link to="/wiki" class="nav-item">📖 Wiki</router-link>
-        <router-link to="/workspaces" class="nav-item"
-          >📁 Workspaces</router-link
-        >
-        <router-link to="/admin" class="nav-item" v-if="auth.isAdmin"
-          >⚙️ Admin</router-link
-        >
-      </nav>
-      <div class="sidebar-footer">
-        <span>{{ auth.userName }}</span>
-        <button
-          @click="
-            auth.logout();
-            $router.push('/login');
-          "
-          class="logout-btn"
-        >
-          Abmelden
-        </button>
-      </div>
-    </aside>
+  <main class="chat-main">
+    <div class="chat-header">
+      <h3>Chat</h3>
+    </div>
 
-    <main class="chat-main">
-      <div class="chat-header">
-        <h3>Chat</h3>
+    <div class="messages" ref="messagesRef">
+      <div v-if="messages.length === 0" class="empty-state">
+        <p>Starte eine Unterhaltung mit deinem Wiki-Wissen.</p>
       </div>
-
-      <div class="messages" ref="messagesRef">
-        <div v-if="messages.length === 0" class="empty-state">
-          <p>Starte eine Unterhaltung mit deinem Wiki-Wissen.</p>
-        </div>
-        <div
-          v-for="msg in messages"
-          :key="msg.id"
-          :class="['message', msg.role]"
-        >
-          <div class="avatar">{{ msg.role === "user" ? "👤" : "🤖" }}</div>
-          <div class="bubble">
-            <div v-html="renderMarkdown(msg.content)"></div>
-            <div v-if="msg.knowledge_refs?.length" class="refs">
-              <small>Quellen: {{ msg.knowledge_refs.length }} Chunks</small>
-            </div>
-          </div>
-        </div>
-        <div v-if="isStreaming" class="message assistant">
-          <div class="avatar">🤖</div>
-          <div class="bubble streaming">
-            <span class="cursor-blink">▊</span>
+      <div v-for="msg in messages" :key="msg.id" :class="['message', msg.role]">
+        <div class="avatar">{{ msg.role === "user" ? "👤" : "🤖" }}</div>
+        <div class="bubble">
+          <div v-html="renderMarkdown(msg.content)"></div>
+          <div v-if="msg.knowledge_refs?.length" class="refs">
+            <small>Quellen: {{ msg.knowledge_refs.length }} Chunks</small>
           </div>
         </div>
       </div>
-
-      <div class="input-bar">
-        <select v-model="workspaceId" class="ws-select">
-          <option value="">— Alle Workspaces —</option>
-          <option v-for="ws in workspaces" :key="ws.id" :value="ws.id">
-            {{ ws.name }}
-          </option>
-        </select>
-        <input
-          v-model="input"
-          @keydown.enter="sendMessage"
-          placeholder="Nachricht eingeben..."
-          class="msg-input"
-          :disabled="isStreaming"
-        />
-        <button
-          @click="sendMessage"
-          :disabled="!input.trim() || isStreaming"
-          class="send-btn"
-        >
-          Senden
-        </button>
+      <div v-if="isStreaming" class="message assistant">
+        <div class="avatar">🤖</div>
+        <div class="bubble streaming">
+          <span class="cursor-blink">▊</span>
+        </div>
       </div>
-    </main>
-  </div>
+    </div>
+
+    <div class="input-bar">
+      <select v-model="workspaceId" class="ws-select">
+        <option value="">— Alle Workspaces —</option>
+        <option v-for="ws in workspaces" :key="ws.id" :value="ws.id">
+          {{ ws.name }}
+        </option>
+      </select>
+      <input
+        v-model="input"
+        @keydown.enter="sendMessage"
+        placeholder="Nachricht eingeben..."
+        class="msg-input"
+        :disabled="isStreaming"
+      />
+      <button
+        @click="sendMessage"
+        :disabled="!input.trim() || isStreaming"
+        class="send-btn"
+      >
+        Senden
+      </button>
+    </div>
+  </main>
 </template>
 
 <script setup lang="ts">
@@ -135,90 +101,65 @@ async function sendMessage() {
   input.value = "";
   isStreaming.value = true;
 
+  // Streaming-Assistant-Nachricht vorbereiten
+  const assistantMsg = {
+    id: crypto.randomUUID(),
+    role: "assistant",
+    content: "",
+    knowledge_refs: [],
+  };
+  messages.value.push(assistantMsg);
+
   try {
-    const res = await axios.post("/api/v1/chat", {
-      workspace_id: workspaceId.value || undefined,
-      message: query,
+    const res = await fetch("/api/v1/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: workspaceId.value || undefined,
+        message: query,
+      }),
     });
-    messages.value.push({
-      id: crypto.randomUUID(),
-      role: "assistant",
-      content: res.data.content,
-      knowledge_refs: res.data.knowledge_refs || [],
-    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err);
+    }
+
+    // Session-ID aus Header lesen
+    const sessionId = res.headers.get("X-Session-Id");
+
+    // SSE-Stream lesen
+    const reader = res.body?.getReader();
+    const decoder = new TextDecoder();
+
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true });
+        assistantMsg.content += text;
+        // Scrollen bei jedem Chunk
+        messagesRef.value?.scrollTo({
+          top: messagesRef.value.scrollHeight,
+          behavior: "smooth",
+        });
+      }
+    }
   } catch (e: any) {
-    messages.value.push({
-      id: crypto.randomUUID(),
-      role: "assistant",
-      content:
-        "❌ Fehler bei der Anfrage: " + (e.response?.data?.error || e.message),
-      knowledge_refs: [],
-    });
+    assistantMsg.content = "❌ Fehler bei der Anfrage: " + e.message;
   } finally {
     isStreaming.value = false;
+    setTimeout(() => {
+      messagesRef.value?.scrollTo({
+        top: messagesRef.value.scrollHeight,
+        behavior: "smooth",
+      });
+    }, 50);
   }
-
-  setTimeout(() => {
-    messagesRef.value?.scrollTo({
-      top: messagesRef.value.scrollHeight,
-      behavior: "smooth",
-    });
-  }, 50);
 }
 </script>
 
 <style scoped>
-.chat-layout {
-  display: flex;
-  height: 100vh;
-}
-
-.sidebar {
-  width: var(--sidebar-width);
-  background: var(--color-bg-secondary);
-  border-right: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-}
-
-.sidebar-header {
-  padding: 1rem;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.sidebar-nav {
-  flex: 1;
-  padding: 0.5rem;
-}
-
-.nav-item {
-  display: block;
-  padding: 0.625rem 0.75rem;
-  border-radius: 6px;
-  color: var(--color-text);
-  margin-bottom: 0.25rem;
-}
-
-.nav-item:hover,
-.nav-item.active {
-  background: var(--color-bg);
-  text-decoration: none;
-}
-
-.sidebar-footer {
-  padding: 1rem;
-  border-top: 1px solid var(--color-border);
-  font-size: 0.875rem;
-}
-
-.logout-btn {
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  font-size: 0.8rem;
-  margin-left: 0.5rem;
-}
-
 .chat-main {
   flex: 1;
   display: flex;

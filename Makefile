@@ -1,21 +1,21 @@
 BUN := $(shell command -v bun 2>/dev/null || echo ~/.bun/bin/bun)
 HOST ?= $(DEPLOY_HOST)
 
-.PHONY: help start stop dev dev-all build migrate db-generate db-studio \
+.PHONY: help start stop dev dev-frontend dev-all build migrate db-generate \
         seed shell-backend install deploy docker-build docker-up docker-down \
         logs status
 
 help: ## 📖 Zeigt diese Hilfe an
 	@echo ""
 	@echo "╔══════════════════════════════════════╗"
-	@echo "║        Wiki-Chat — Makefile          ║"
+	@echo "║           Knora — Makefile           ║"
 	@echo "╚══════════════════════════════════════╝"
 	@echo ""
 	@echo "📦  Installation"
 	@echo "  make install         Alle Abhängigkeiten installieren"
 	@echo ""
 	@echo "🚀  Entwicklung (lokal — Backend + Frontend nativ)"
-	@echo "  make start           Docker-Services starten (DB, Redis, Parser)"
+	@echo "  make start           Docker-Services starten (PostgreSQL)"
 	@echo "  make dev             Backend starten (Bun, Port 3000, Hot-Reload)"
 	@echo "  make dev-frontend    Frontend starten (Vite, Port 5173, HMR)"
 	@echo "  make dev-all         Services + Backend + Frontend starten"
@@ -27,7 +27,7 @@ help: ## 📖 Zeigt diese Hilfe an
 	@echo "  make db-generate     Drizzle Migration generieren (nach Schema-Änderung)"
 	@echo "  make migrate         Migration ausführen"
 	@echo "  make seed            Datenbank mit Testdaten füllen"
-	@echo "  make shell-backend   Backend-Container-Shell (für DB-Queries)"
+	@echo "  make shell-db        PostgreSQL-Shell öffnen"
 	@echo ""
 	@echo "🐳  Docker (Produktion)"
 	@echo "  make build           Docker-Images bauen"
@@ -52,12 +52,12 @@ install: ## 📦 Alle Abhängigkeiten installieren
 
 # === Entwicklung (lokal) ===
 
-start: ## 🚀 Docker-Services starten (DB, Redis, Parser)
-	@echo "🚀 Starte Docker-Services..."
-	docker compose -f docker-compose.dev.yml up -d
-	@echo "   DB:      postgresql://localhost:5432"
-	@echo "   Redis:   localhost:6379"
-	@echo "   Parser:  http://localhost:8001/parse"
+start: ## 🚀 Docker-Services starten (PostgreSQL)
+	@echo "🚀 Starte PostgreSQL..."
+	docker compose -f docker-compose.dev.yml up -d db
+	@echo "   DB:  postgresql://localhost:5432/knora (User: knora)"
+	@echo ""
+	@echo "💡 Parser (optional): docker compose -f docker-compose.dev.yml --profile parser up -d"
 
 stop: ## 🛑 Docker-Services stoppen
 	@echo "🛑 Stoppe Docker-Services..."
@@ -71,10 +71,24 @@ dev-frontend: ## 💻 Frontend starten (Vite, Port 5173, HMR)
 	@echo "💻 Starte Frontend auf http://localhost:5173 ..."
 	cd frontend && $(BUN) run dev
 
-dev-all: start ## 🚀🔥 Alles starten (Services + Backend + Frontend)
-	@echo "🔥 Starte Backend + Frontend..."
-	$(BUN) run --cwd backend dev &
-	cd frontend && $(BUN) run dev
+dev-all: ## 🚀🔥 Alles starten (Services + Backend + Frontend)
+	@echo "🚀 Starte PostgreSQL (falls nicht bereits laufend)..."
+	@docker compose -f docker-compose.dev.yml up -d db 2>/dev/null || true
+	@echo ""
+	@if lsof -i:3000 >/dev/null 2>&1; then \
+		echo "⚠️  Backend läuft bereits auf Port 3000 (überspringe)"; \
+	else \
+		echo "🔥 Starte Backend (Port 3000)..."; \
+		cd backend && $(BUN) run dev & \
+		sleep 2; \
+	fi
+	@echo ""
+	@if lsof -i:5173 >/dev/null 2>&1; then \
+		echo "⚠️  Frontend läuft bereits auf Port 5173 (überspringe)"; \
+	else \
+		echo "💻 Starte Frontend (Port 5173)..."; \
+		cd frontend && $(BUN) run dev; \
+	fi
 
 logs: ## 📋 Docker-Services Logs anzeigen
 	docker compose -f docker-compose.dev.yml logs -f
@@ -84,11 +98,9 @@ status: ## 🔍 Docker-Services Status prüfen
 	docker compose -f docker-compose.dev.yml ps
 	@echo ""
 	@echo "PostgreSQL:"
-	@docker compose -f docker-compose.dev.yml exec db pg_isready -U wikichat 2>/dev/null || echo "   ❌ Nicht erreichbar"
-	@echo "Redis:"
-	@docker compose -f docker-compose.dev.yml exec redis redis-cli ping 2>/dev/null || echo "   ❌ Nicht erreichbar"
+	@docker compose -f docker-compose.dev.yml exec db pg_isready -U knora 2>/dev/null || echo "   ❌ Nicht erreichbar"
 	@echo "Parser:"
-	@curl -s http://localhost:8001/health 2>/dev/null || echo "   ❌ Nicht erreichbar"
+	@curl -s http://localhost:8001/ 2>/dev/null && echo "   ✅ Laufend" || echo "   ❌ Nicht gestartet (optional: --profile parser)"
 
 # === Datenbank ===
 
@@ -104,34 +116,8 @@ migrate: ## 🗄️ Migration ausführen
 
 seed: ## 🌱 Datenbank mit Testdaten füllen
 	@echo "🌱 Fülle Datenbank mit Testdaten..."
-	cd backend && $(BUN) run src/db/seed.ts
+	cd backend && $(BUN) run db:seed
 	@echo "✅ Seed abgeschlossen!"
 
-shell-backend: ## 🐚 Backend-Container-Shell
-	docker compose -f docker-compose.dev.yml exec db psql -U wikichat wikichat
-
-# === Docker (Produktion) ===
-
-build: ## 🐳 Docker-Images bauen
-	@echo "🐳 Baue Docker-Images..."
-	docker compose build
-	@echo "✅ Build abgeschlossen!"
-
-up: ## 🐳 Docker-Services starten (Produktion)
-	@echo "🐳 Starte Produktions-Services..."
-	docker compose up -d
-	@echo "✅ Services gestartet!"
-
-down: ## 🐳 Docker-Services stoppen (Produktion)
-	@echo "🐳 Stoppe Produktions-Services..."
-	docker compose down
-	@echo "✅ Services gestoppt!"
-
-# === Deployment ===
-
-deploy: ## 🚢 Auf Hetzner deployen (make deploy HOST=user@server)
-	@if [ -z "$(HOST)" ]; then \
-		echo "❌ Bitte HOST angeben: make deploy HOST=user@server"; \
-		exit 1; \
-	fi
-	./deploy.sh $(HOST)
+shell-db: ## 🐚 PostgreSQL-Shell öffnen
+	docker compose -f docker-compose.dev.yml exec db psql -U knora knora

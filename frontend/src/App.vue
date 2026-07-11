@@ -1,5 +1,6 @@
 <template>
-  <div class="app-layout">
+  <!-- Nur Layout anzeigen wenn eingeloggt -->
+  <div class="app-layout" v-if="auth.isAuthenticated">
     <!-- Sidebar -->
     <aside class="app-sidebar">
       <div class="sidebar-header">
@@ -18,34 +19,43 @@
           <i class="pi pi-book"></i>
           <span>Wiki</span>
         </router-link>
-        <router-link to="/admin" class="nav-item">
+        <router-link to="/settings" class="nav-item">
           <i class="pi pi-cog"></i>
-          <span>Admin</span>
+          <span>Einstellungen</span>
         </router-link>
       </nav>
+      <div class="sidebar-footer">
+        <span class="sidebar-user">{{ auth.userName }}</span>
+        <button class="sidebar-logout" @click="logout">Abmelden</button>
+      </div>
     </aside>
 
     <!-- Main Content -->
     <div class="app-main">
       <header class="app-header">
-        <div class="header-left">
-          <h1 class="app-title">Knora</h1>
-        </div>
-        <div class="header-right">
-          <span class="user-badge">Admin</span>
-        </div>
+        <h1 class="app-title">Knora</h1>
       </header>
       <main class="app-content">
         <router-view />
       </main>
     </div>
   </div>
+
+  <!-- Login-Seite ohne Layout -->
+  <router-view v-else />
 </template>
 
 <script setup lang="ts">
+import { useAuthStore } from "./stores/auth";
 import { useRouter } from "vue-router";
 
+const auth = useAuthStore();
 const router = useRouter();
+
+function logout() {
+  auth.logout();
+  router.push("/login");
+}
 </script>
 
 <style>
@@ -148,6 +158,44 @@ body {
   text-align: center;
 }
 
+/* Sidebar Footer */
+.sidebar-footer {
+  padding: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.sidebar-user {
+  font-size: 0.8rem;
+  color: var(--color-sidebar-text);
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-logout {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--color-sidebar-text);
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.sidebar-logout:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
 /* Main Area */
 .app-main {
   flex: 1;
@@ -171,14 +219,6 @@ body {
   font-size: 1.1rem;
   font-weight: 600;
   color: #374151;
-}
-
-.user-badge {
-  font-size: 0.8rem;
-  color: #6b7280;
-  background: #f3f4f6;
-  padding: 0.3rem 0.75rem;
-  border-radius: 999px;
 }
 
 .app-content {

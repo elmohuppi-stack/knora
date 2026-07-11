@@ -1,105 +1,74 @@
 <template>
-  <div class="layout">
-    <aside class="sidebar">
-      <div class="sidebar-header"><h2>Wiki-Chat</h2></div>
-      <nav class="sidebar-nav">
-        <router-link to="/chat" class="nav-item">💬 Chat</router-link>
-        <router-link to="/wiki" class="nav-item">📖 Wiki</router-link>
-        <router-link to="/workspaces" class="nav-item active"
-          >📁 Workspaces</router-link
-        >
-        <router-link to="/admin" class="nav-item" v-if="auth.isAdmin"
-          >⚙️ Admin</router-link
-        >
-      </nav>
-      <div class="sidebar-footer">
-        <span>{{ auth.userName }}</span>
-        <button
-          @click="
-            auth.logout();
-            $router.push('/login');
-          "
-          class="logout-btn"
-        >
-          Abmelden
+  <main class="main-content">
+    <div class="header">
+      <h3>📁 Workspaces</h3>
+      <button class="btn-primary" @click="showCreate = true">+ Neu</button>
+    </div>
+
+    <div class="content">
+      <div v-if="loading" class="loading">Lade Workspaces...</div>
+
+      <div v-else-if="workspaces.length === 0" class="empty">
+        <p>Noch keine Workspaces. Erstelle deinen ersten!</p>
+        <button class="btn-primary" @click="showCreate = true">
+          Workspace erstellen
         </button>
       </div>
-    </aside>
 
-    <main class="main-content">
-      <div class="header">
-        <h3>📁 Workspaces</h3>
-        <button class="btn-primary" @click="showCreate = true">+ Neu</button>
+      <div v-else class="ws-grid">
+        <div
+          v-for="ws in workspaces"
+          :key="ws.id"
+          class="ws-card"
+          @click="$router.push('/workspaces/' + ws.id)"
+        >
+          <h4>{{ ws.name }}</h4>
+          <p v-if="ws.description" class="ws-desc">{{ ws.description }}</p>
+          <div class="ws-meta">
+            <span class="ws-badge" v-if="ws.indexing_strategy?.wiki_enabled"
+              >📖 Wiki</span
+            >
+            <span class="ws-badge" v-if="ws.indexing_strategy?.vector_enabled"
+              >🔍 Vector</span
+            >
+            <span class="ws-date">{{ formatDate(ws.created_at) }}</span>
+          </div>
+        </div>
       </div>
+    </div>
 
-      <div class="content">
-        <div v-if="loading" class="loading">Lade Workspaces...</div>
-
-        <div v-else-if="workspaces.length === 0" class="empty">
-          <p>Noch keine Workspaces. Erstelle deinen ersten!</p>
-          <button class="btn-primary" @click="showCreate = true">
-            Workspace erstellen
+    <!-- Create Dialog -->
+    <div
+      v-if="showCreate"
+      class="dialog-overlay"
+      @click.self="showCreate = false"
+    >
+      <div class="dialog">
+        <h3>Neuen Workspace erstellen</h3>
+        <div class="field">
+          <label>Name *</label>
+          <input v-model="newName" placeholder="z.B. Meine Wissensdatenbank" />
+        </div>
+        <div class="field">
+          <label>Beschreibung</label>
+          <textarea v-model="newDesc" placeholder="Optional"></textarea>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn-secondary" @click="showCreate = false">
+            Abbrechen
+          </button>
+          <button
+            class="btn-primary"
+            @click="createWorkspace"
+            :disabled="!newName.trim()"
+          >
+            Erstellen
           </button>
         </div>
-
-        <div v-else class="ws-grid">
-          <div
-            v-for="ws in workspaces"
-            :key="ws.id"
-            class="ws-card"
-            @click="$router.push('/workspaces/' + ws.id)"
-          >
-            <h4>{{ ws.name }}</h4>
-            <p v-if="ws.description" class="ws-desc">{{ ws.description }}</p>
-            <div class="ws-meta">
-              <span class="ws-badge" v-if="ws.indexing_strategy?.wiki_enabled"
-                >📖 Wiki</span
-              >
-              <span class="ws-badge" v-if="ws.indexing_strategy?.vector_enabled"
-                >🔍 Vector</span
-              >
-              <span class="ws-date">{{ formatDate(ws.created_at) }}</span>
-            </div>
-          </div>
-        </div>
+        <p v-if="createError" class="error">{{ createError }}</p>
       </div>
-
-      <!-- Create Dialog -->
-      <div
-        v-if="showCreate"
-        class="dialog-overlay"
-        @click.self="showCreate = false"
-      >
-        <div class="dialog">
-          <h3>Neuen Workspace erstellen</h3>
-          <div class="field">
-            <label>Name *</label>
-            <input
-              v-model="newName"
-              placeholder="z.B. Meine Wissensdatenbank"
-            />
-          </div>
-          <div class="field">
-            <label>Beschreibung</label>
-            <textarea v-model="newDesc" placeholder="Optional"></textarea>
-          </div>
-          <div class="dialog-actions">
-            <button class="btn-secondary" @click="showCreate = false">
-              Abbrechen
-            </button>
-            <button
-              class="btn-primary"
-              @click="createWorkspace"
-              :disabled="!newName.trim()"
-            >
-              Erstellen
-            </button>
-          </div>
-          <p v-if="createError" class="error">{{ createError }}</p>
-        </div>
-      </div>
-    </main>
-  </div>
+    </div>
+  </main>
 </template>
 
 <script setup lang="ts">
@@ -162,49 +131,6 @@ function formatDate(dateStr: string) {
 </script>
 
 <style scoped>
-.layout {
-  display: flex;
-  height: 100vh;
-}
-.sidebar {
-  width: var(--sidebar-width);
-  background: var(--color-bg-secondary);
-  border-right: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-}
-.sidebar-header {
-  padding: 1rem;
-  border-bottom: 1px solid var(--color-border);
-}
-.sidebar-nav {
-  flex: 1;
-  padding: 0.5rem;
-}
-.nav-item {
-  display: block;
-  padding: 0.625rem 0.75rem;
-  border-radius: 6px;
-  color: var(--color-text);
-  margin-bottom: 0.25rem;
-}
-.nav-item:hover,
-.nav-item.active {
-  background: var(--color-bg);
-  text-decoration: none;
-}
-.sidebar-footer {
-  padding: 1rem;
-  border-top: 1px solid var(--color-border);
-  font-size: 0.875rem;
-}
-.logout-btn {
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  font-size: 0.8rem;
-  margin-left: 0.5rem;
-}
 .main-content {
   flex: 1;
   overflow-y: auto;

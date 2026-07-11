@@ -1,184 +1,156 @@
 <template>
-  <div class="layout">
-    <aside class="sidebar">
-      <div class="sidebar-header"><h2>Wiki-Chat</h2></div>
-      <nav class="sidebar-nav">
-        <router-link to="/chat" class="nav-item">💬 Chat</router-link>
-        <router-link to="/wiki" class="nav-item">📖 Wiki</router-link>
-        <router-link to="/workspaces" class="nav-item"
-          >📁 Workspaces</router-link
-        >
-        <router-link to="/admin" class="nav-item active" v-if="auth.isAdmin"
-          >⚙️ Admin</router-link
-        >
-      </nav>
-      <div class="sidebar-footer">
-        <span>{{ auth.userName }}</span>
-        <button
-          @click="
-            auth.logout();
-            $router.push('/login');
-          "
-          class="logout-btn"
-        >
-          Abmelden
-        </button>
+  <main class="main-content">
+    <!-- Tabs -->
+    <div class="tabs">
+      <button
+        :class="['tab', { active: tab === 'users' }]"
+        @click="tab = 'users'"
+      >
+        👥 Benutzer
+      </button>
+      <button
+        :class="['tab', { active: tab === 'models' }]"
+        @click="tab = 'models'"
+      >
+        🤖 Model-Provider
+      </button>
+    </div>
+
+    <!-- User Management -->
+    <div v-if="tab === 'users'" class="content">
+      <div class="section-header">
+        <h3>👥 Benutzer</h3>
       </div>
-    </aside>
-
-    <main class="main-content">
-      <!-- Tabs -->
-      <div class="tabs">
-        <button
-          :class="['tab', { active: tab === 'users' }]"
-          @click="tab = 'users'"
-        >
-          👥 Benutzer
-        </button>
-        <button
-          :class="['tab', { active: tab === 'models' }]"
-          @click="tab = 'models'"
-        >
-          🤖 Model-Provider
-        </button>
-      </div>
-
-      <!-- User Management -->
-      <div v-if="tab === 'users'" class="content">
-        <div class="section-header">
-          <h3>👥 Benutzer</h3>
-        </div>
-        <table class="table" v-if="users.length">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>E-Mail</th>
-              <th>Rolle</th>
-              <th>Erstellt</th>
-              <th>Aktion</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="u in users" :key="u.id">
-              <td>{{ u.id }}</td>
-              <td>{{ u.name }}</td>
-              <td>{{ u.email }}</td>
-              <td>
-                <select
-                  v-model="u.role"
-                  @change="updateRole(u)"
-                  :disabled="u.id === auth.user?.id"
-                >
-                  <option value="viewer">Viewer</option>
-                  <option value="editor">Editor</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </td>
-              <td>{{ formatDate(u.created_at) }}</td>
-              <td>
-                <button
-                  class="btn-danger-sm"
-                  @click="deleteUser(u)"
-                  :disabled="u.id === auth.user?.id"
-                >
-                  ✕
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-else class="empty">Lade Benutzer...</p>
-      </div>
-
-      <!-- Model Provider Management -->
-      <div v-if="tab === 'models'" class="content">
-        <div class="section-header">
-          <h3>🤖 Model-Provider</h3>
-          <button class="btn-primary" @click="showCreate = true">+ Neu</button>
-        </div>
-
-        <div v-if="providers.length" class="provider-list">
-          <div v-for="p in providers" :key="p.id" class="provider-card">
-            <div class="provider-info">
-              <strong>{{ p.name }}</strong>
-              <span class="provider-type">{{ p.provider_type }}</span>
-              <span class="provider-model">{{ p.default_model }}</span>
-              <span class="provider-url">{{ p.api_base_url }}</span>
-              <span class="provider-key">🔑 {{ p.api_key_preview }}</span>
-            </div>
-            <div class="provider-actions">
-              <span
-                :class="['status-dot', p.is_active ? 'active' : 'inactive']"
-              ></span>
-              <button class="btn-danger-sm" @click="deleteProvider(p.id)">
+      <table class="table" v-if="users.length">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>E-Mail</th>
+            <th>Rolle</th>
+            <th>Erstellt</th>
+            <th>Aktion</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="u in users" :key="u.id">
+            <td>{{ u.id }}</td>
+            <td>{{ u.name }}</td>
+            <td>{{ u.email }}</td>
+            <td>
+              <select
+                v-model="u.role"
+                @change="updateRole(u)"
+                :disabled="u.id === auth.user?.id"
+              >
+                <option value="viewer">Viewer</option>
+                <option value="editor">Editor</option>
+                <option value="admin">Admin</option>
+              </select>
+            </td>
+            <td>{{ formatDate(u.created_at) }}</td>
+            <td>
+              <button
+                class="btn-danger-sm"
+                @click="deleteUser(u)"
+                :disabled="u.id === auth.user?.id"
+              >
                 ✕
               </button>
-            </div>
-          </div>
-        </div>
-        <p v-else class="empty">Noch keine Provider konfiguriert.</p>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="empty">Lade Benutzer...</p>
+    </div>
 
-        <!-- Create Provider Dialog -->
-        <div
-          v-if="showCreate"
-          class="dialog-overlay"
-          @click.self="showCreate = false"
-        >
-          <div class="dialog">
-            <h3>Neuen Model-Provider erstellen</h3>
-            <div class="field">
-              <label>Name *</label>
-              <input v-model="form.name" placeholder="z.B. OpenAI, DeepSeek" />
-            </div>
-            <div class="field">
-              <label>Typ *</label>
-              <select v-model="form.provider_type">
-                <option value="chat">Chat</option>
-                <option value="embedding">Embedding</option>
-                <option value="both">Beides</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>API Base URL *</label>
-              <input
-                v-model="form.api_base_url"
-                placeholder="https://api.openai.com/v1"
-              />
-            </div>
-            <div class="field">
-              <label>API Key *</label>
-              <input
-                v-model="form.api_key"
-                type="password"
-                placeholder="sk-..."
-              />
-            </div>
-            <div class="field">
-              <label>Default Model *</label>
-              <input
-                v-model="form.default_model"
-                placeholder="gpt-4o, deepseek-chat"
-              />
-            </div>
-            <div class="dialog-actions">
-              <button class="btn-secondary" @click="showCreate = false">
-                Abbrechen
-              </button>
-              <button
-                class="btn-primary"
-                @click="createProvider"
-                :disabled="!form.name || !form.api_key"
-              >
-                Erstellen
-              </button>
-            </div>
-            <p v-if="createError" class="error">{{ createError }}</p>
+    <!-- Model Provider Management -->
+    <div v-if="tab === 'models'" class="content">
+      <div class="section-header">
+        <h3>🤖 Model-Provider</h3>
+        <button class="btn-primary" @click="showCreate = true">+ Neu</button>
+      </div>
+
+      <div v-if="providers.length" class="provider-list">
+        <div v-for="p in providers" :key="p.id" class="provider-card">
+          <div class="provider-info">
+            <strong>{{ p.name }}</strong>
+            <span class="provider-type">{{ p.provider_type }}</span>
+            <span class="provider-model">{{ p.default_model }}</span>
+            <span class="provider-url">{{ p.api_base_url }}</span>
+            <span class="provider-key">🔑 {{ p.api_key_preview }}</span>
+          </div>
+          <div class="provider-actions">
+            <span
+              :class="['status-dot', p.is_active ? 'active' : 'inactive']"
+            ></span>
+            <button class="btn-danger-sm" @click="deleteProvider(p.id)">
+              ✕
+            </button>
           </div>
         </div>
       </div>
-    </main>
-  </div>
+      <p v-else class="empty">Noch keine Provider konfiguriert.</p>
+
+      <!-- Create Provider Dialog -->
+      <div
+        v-if="showCreate"
+        class="dialog-overlay"
+        @click.self="showCreate = false"
+      >
+        <div class="dialog">
+          <h3>Neuen Model-Provider erstellen</h3>
+          <div class="field">
+            <label>Name *</label>
+            <input v-model="form.name" placeholder="z.B. OpenAI, DeepSeek" />
+          </div>
+          <div class="field">
+            <label>Typ *</label>
+            <select v-model="form.provider_type">
+              <option value="chat">Chat</option>
+              <option value="embedding">Embedding</option>
+              <option value="both">Beides</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>API Base URL *</label>
+            <input
+              v-model="form.api_base_url"
+              placeholder="https://api.openai.com/v1"
+            />
+          </div>
+          <div class="field">
+            <label>API Key *</label>
+            <input
+              v-model="form.api_key"
+              type="password"
+              placeholder="sk-..."
+            />
+          </div>
+          <div class="field">
+            <label>Default Model *</label>
+            <input
+              v-model="form.default_model"
+              placeholder="gpt-4o, deepseek-chat"
+            />
+          </div>
+          <div class="dialog-actions">
+            <button class="btn-secondary" @click="showCreate = false">
+              Abbrechen
+            </button>
+            <button
+              class="btn-primary"
+              @click="createProvider"
+              :disabled="!form.name || !form.api_key"
+            >
+              Erstellen
+            </button>
+          </div>
+          <p v-if="createError" class="error">{{ createError }}</p>
+        </div>
+      </div>
+    </div>
+  </main>
 </template>
 
 <script setup lang="ts">
@@ -289,49 +261,6 @@ function formatDate(dateStr: string) {
 </script>
 
 <style scoped>
-.layout {
-  display: flex;
-  height: 100vh;
-}
-.sidebar {
-  width: var(--sidebar-width);
-  background: var(--color-bg-secondary);
-  border-right: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-}
-.sidebar-header {
-  padding: 1rem;
-  border-bottom: 1px solid var(--color-border);
-}
-.sidebar-nav {
-  flex: 1;
-  padding: 0.5rem;
-}
-.nav-item {
-  display: block;
-  padding: 0.625rem 0.75rem;
-  border-radius: 6px;
-  color: var(--color-text);
-  margin-bottom: 0.25rem;
-}
-.nav-item:hover,
-.nav-item.active {
-  background: var(--color-bg);
-  text-decoration: none;
-}
-.sidebar-footer {
-  padding: 1rem;
-  border-top: 1px solid var(--color-border);
-  font-size: 0.875rem;
-}
-.logout-btn {
-  background: none;
-  border: none;
-  color: var(--color-text-secondary);
-  font-size: 0.8rem;
-  margin-left: 0.5rem;
-}
 .main-content {
   flex: 1;
   overflow-y: auto;
