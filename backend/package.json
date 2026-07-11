@@ -1,5 +1,5 @@
 {
-  "name": "@wikichat/backend",
+  "name": "@knora/backend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,12 +13,11 @@
     "db:seed": "bun run src/db/seed.ts"
   },
   "dependencies": {
-    "@wikichat/shared": "workspace:*",
+    "@knora/shared": "workspace:*",
     "hono": "^4.7.0",
     "@hono/zod-validator": "^0.4.0",
     "drizzle-orm": "^0.40.0",
     "postgres": "^3.4.0",
-    "ioredis": "^5.5.0",
     "jsonwebtoken": "^9.0.0",
     "bcryptjs": "^2.4.3",
     "zod": "^3.24.0",

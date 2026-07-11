@@ -6,11 +6,11 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: wikichat
-      POSTGRES_PASSWORD: wikichat-dev
-      POSTGRES_DB: wikichat
+      POSTGRES_USER: knora
+      POSTGRES_PASSWORD: knora-dev
+      POSTGRES_DB: knora
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U wikichat"]
+      test: ["CMD-SHELL", "pg_isready -U knora"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -18,18 +18,9 @@ services:
     networks:
       - devnet
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-    restart: unless-stopped
-    networks:
-      - devnet
-
   parser:
     build: ./parser
+    profiles: ["parser"]
     ports:
       - "8001:8000"
     volumes:

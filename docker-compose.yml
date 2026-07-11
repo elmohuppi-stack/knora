@@ -6,15 +6,12 @@ services:
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-wikichat}:${DB_PASSWORD:-changeme}@wikichat-db:5432/wikichat
-      REDIS_URL: redis://wikichat-redis:6379
+      DATABASE_URL: postgresql://${DB_USER:-knora}:${DB_PASSWORD:-changeme}@knora-db:5432/knora
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       PARSER_URL: http://parser:8000/parse
       PORT: 3000
     depends_on:
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -39,11 +36,11 @@ services:
     volumes:
       - data:/var/lib/postgresql/data
     environment:
-      POSTGRES_USER: ${DB_USER:-wikichat}
+      POSTGRES_USER: ${DB_USER:-knora}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
-      POSTGRES_DB: wikichat
+      POSTGRES_DB: knora
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-wikichat}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-knora}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -51,22 +48,12 @@ services:
     networks:
       appnet:
         aliases:
-          - wikichat-db
+          - knora-db
 
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-    restart: unless-stopped
-    networks:
-      appnet:
-        aliases:
-          - wikichat-redis
-
+  # Parser nur bei Bedarf: docker compose --profile parser up -d
   parser:
     build: ./parser
+    profiles: ["parser"]
     environment:
       PORT: 8000
     restart: unless-stopped
@@ -75,7 +62,6 @@ services:
 
 volumes:
   data:
-  redis-data:
 
 networks:
   appnet:

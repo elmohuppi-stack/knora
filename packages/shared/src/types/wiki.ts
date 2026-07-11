@@ -1,6 +1,16 @@
 import { z } from "zod";
 
-export type WikiPageType = "article" | "entity" | "concept";
+export const WikiPageTypeEnum = z.enum([
+  "article",
+  "entity",
+  "concept",
+  "index",
+  "log",
+  "synthesis",
+  "comparison",
+  "youtube_transcript",
+]);
+export type WikiPageType = z.infer<typeof WikiPageTypeEnum>;
 export type WikiPageStatus = "published" | "draft" | "archived";
 
 export const WikiPageSchema = z.object({
@@ -10,11 +20,14 @@ export const WikiPageSchema = z.object({
   title: z.string().max(512),
   summary: z.string().default(""),
   content: z.string().default(""),
-  page_type: z.enum(["article", "entity", "concept"]).default("article"),
+  page_type: WikiPageTypeEnum.default("article"),
   status: z.enum(["published", "draft", "archived"]).default("published"),
   source_document_id: z.string().uuid().nullable(),
   out_links: z.array(z.string()).default([]),
   in_links: z.array(z.string()).default([]),
+  aliases: z.array(z.string()).default([]),
+  source_refs: z.array(z.string()).default([]),
+  page_metadata: z.record(z.any()).default({}),
   version: z.number().default(1),
   created_by: z.number().nullable(),
   created_at: z.string().datetime(),

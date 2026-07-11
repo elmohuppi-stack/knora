@@ -8,17 +8,17 @@ if [ -z "$HOST" ]; then
   exit 1
 fi
 
-echo "🚀 Deploying Wiki-Chat to $HOST ..."
+echo "🚀 Deploying Knora to $HOST ..."
 
 rsync -avz --delete \
   --exclude .env \
   --exclude node_modules \
   --exclude .git \
   --exclude drizzle \
-  ./ "$HOST:/var/www/wikichat/"
+  ./ "$HOST:/var/www/knora/"
 
-ssh "$HOST" "cd /var/www/wikichat && docker compose up -d --build"
+ssh "$HOST" "cd /var/www/knora && docker compose up -d --build"
 
 echo "✅ Deployed successfully!"
-echo "   Frontend: https://wikichat.elmarhepp.de"
-echo "   API:      https://wikichat-api.elmarhepp.de"
+echo "   Frontend: https://knora.elmarhepp.de"
+echo "   API:      https://knora-api.elmarhepp.de"

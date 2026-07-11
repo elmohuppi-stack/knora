@@ -10,7 +10,7 @@ async function seed() {
   const [admin] = await db
     .insert(users)
     .values({
-      email: "admin@wikichat.dev",
+      email: "admin@knora.app",
       password_hash,
       name: "Admin",
       role: "admin",
