@@ -174,10 +174,12 @@
           <pre>{{ selectedDoc.content }}</pre>
         </div>
         <p v-else class="empty">(Kein Inhalt)</p>
-        <div class="dialog-actions">
-          <button class="btn-secondary" @click="showDetail = false">
-            Schließen
+        <div class="dialog-actions" style="justify-content:space-between;">
+          <button class="btn-secondary" @click="generateWikiForDoc(selectedDoc.id)" :disabled="generatingWiki">
+            {{ generatingWiki ? "⏳ Generiere..." : "📖 Wiki-Artikel generieren" }}
           </button>
+          <span v-if="wikiGenResult" class="success" style="margin-right:auto;margin-left:0.5rem;">{{ wikiGenResult }}</span>
+          <button class="btn-secondary" @click="showDetail = false">Schließen</button>
         </div>
       </div>
     </div>
@@ -328,10 +330,27 @@ const settingsError = ref("");
 // Document detail
 const showDetail = ref(false);
 const selectedDoc = ref<any>(null);
+const generatingWiki = ref(false);
+const wikiGenResult = ref("");
 
 function showDocDetail(doc: any) {
   selectedDoc.value = doc;
   showDetail.value = true;
+  wikiGenResult.value = "";
+}
+
+async function generateWikiForDoc(docId: string) {
+  generatingWiki.value = true;
+  wikiGenResult.value = "";
+  try {
+    const res = await axios.post(`/api/v1/wiki/${workspaceId.value}/generate/${docId}`);
+    const page = res.data.page;
+    wikiGenResult.value = `✅ „${page.title}” erstellt`;
+  } catch (e: any) {
+    wikiGenResult.value = "❌ " + (e.response?.data?.error || e.message);
+  } finally {
+    generatingWiki.value = false;
+  }
 }
 
 onMounted(async () => {

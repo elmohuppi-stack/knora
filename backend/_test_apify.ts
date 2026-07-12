@@ -8,7 +8,10 @@
 
 const videoId = process.argv[2] || process.env.VIDEO_ID || "dQw4w9WgXcQ";
 const apiKey = process.env.APIFY_API_KEY;
-if (!apiKey) { console.error("❌ APIFY_API_KEY nicht gesetzt"); process.exit(1); }
+if (!apiKey) {
+  console.error("❌ APIFY_API_KEY nicht gesetzt");
+  process.exit(1);
+}
 
 console.log("╔══════════════════════════════════════╗");
 console.log("║       Apify Provider Direkt-Test      ║");
