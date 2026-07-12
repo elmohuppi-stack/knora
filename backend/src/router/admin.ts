@@ -43,6 +43,7 @@ adminRouter.get("/activity-logs", async (c) => {
   const action = c.req.query("action");
   const status = c.req.query("status");
   const workspace_id = c.req.query("workspace_id");
+  const document_id = c.req.query("document_id");
   const limit = parseInt(c.req.query("limit") || "50");
   const offset = parseInt(c.req.query("offset") || "0");
 
@@ -50,6 +51,7 @@ adminRouter.get("/activity-logs", async (c) => {
     action,
     status,
     workspace_id,
+    document_id,
     limit,
     offset,
   });

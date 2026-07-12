@@ -77,6 +77,7 @@ export async function getLogs(options: {
   action?: string;
   status?: string;
   workspace_id?: string;
+  document_id?: string;
   limit?: number;
   offset?: number;
 }): Promise<{ logs: any[]; total: number }> {
@@ -98,10 +99,10 @@ export async function getLogs(options: {
     ) as any;
   }
   if (options.workspace_id) {
-    conditions = and(
-      conditions,
-      eq(activityLogs.workspace_id, options.workspace_id),
-    ) as any;
+    conditions = and(conditions, eq(activityLogs.workspace_id, options.workspace_id)) as any;
+  }
+  if (options.document_id) {
+    conditions = and(conditions, eq(activityLogs.document_id, options.document_id)) as any;
   }
 
   const rows = await db
