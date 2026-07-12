@@ -48,14 +48,38 @@ export async function register(email: string, password: string, name: string) {
 export async function login(email: string, password: string) {
   // 1. Prüfe zuerst Admin-Credentials aus .env
   if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+    // Stelle sicher, dass der .env-Admin auch in der DB existiert (für FK-Constraints)
+    const [existing] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, ADMIN_EMAIL))
+      .limit(1);
+
+    let userId: number;
+    if (existing) {
+      userId = existing.id;
+    } else {
+      const password_hash = await bcrypt.hash(ADMIN_PASSWORD, SALT_ROUNDS);
+      const [newUser] = await db
+        .insert(users)
+        .values({
+          email: ADMIN_EMAIL,
+          password_hash,
+          name: ADMIN_NAME,
+          role: "admin",
+        })
+        .returning();
+      userId = newUser.id;
+    }
+
     const token = createToken({
-      id: 0,
+      id: userId,
       email: ADMIN_EMAIL,
       name: ADMIN_NAME,
       role: "admin",
     });
     return {
-      user: { id: 0, email: ADMIN_EMAIL, name: ADMIN_NAME, role: "admin" },
+      user: { id: userId, email: ADMIN_EMAIL, name: ADMIN_NAME, role: "admin" },
       token,
     };
   }

@@ -248,6 +248,145 @@ export async function getStats(workspaceId: string) {
   };
 }
 
+// --- WeKnora Import ---
+
+export interface WeKnoraPage {
+  id?: string;
+  knowledge_base_id?: string;
+  slug: string;
+  title: string;
+  summary?: string;
+  content?: string;
+  page_type?: string;
+  status?: string;
+  out_links?: string[];
+  in_links?: string[];
+  aliases?: string[];
+  source_refs?: string[];
+  page_metadata?: Record<string, any>;
+  version?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+const PAGE_TYPE_MAP: Record<string, string> = {
+  entity: "entity",
+  concept: "concept",
+  article: "article",
+  index: "index",
+  log: "log",
+  synthesis: "synthesis",
+  comparison: "comparison",
+  youtube_transcript: "youtube_transcript",
+};
+
+function mapPageType(type: string | undefined): string {
+  if (!type) return "article";
+  const lower = type.toLowerCase();
+  return PAGE_TYPE_MAP[lower] || "article";
+}
+
+export async function importWeKnoraPages(
+  workspaceId: string,
+  pages: WeKnoraPage[],
+  createdBy: number,
+): Promise<{
+  imported: number;
+  skipped: number;
+  errors: string[];
+  pages: any[];
+}> {
+  let imported = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+  const importedPages: any[] = [];
+
+  // Bestehende Slugs abrufen
+  const existing = await listPages(workspaceId, { page_size: 500 });
+  const existingSlugs = new Set(existing.pages.map((p) => p.slug));
+
+  for (const wp of pages) {
+    try {
+      // Slug generieren – falls schon vorhanden, counter anhängen
+      let slug = wp.slug?.trim();
+      if (!slug) {
+        slug = wp.title
+          .toLowerCase()
+          .replace(/[^a-z0-9äöüß]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 200);
+      }
+      if (!slug) {
+        errors.push(`Page "${wp.title}" has no valid slug – skipped`);
+        skipped++;
+        continue;
+      }
+
+      // Prüfen ob bereits importiert
+      if (existingSlugs.has(slug)) {
+        // Slug mit Suffix
+        let counter = 1;
+        while (existingSlugs.has(`${slug}-${counter}`)) counter++;
+        slug = `${slug}-${counter}`;
+      }
+
+      existingSlugs.add(slug);
+
+      const page = await createPage({
+        workspace_id: workspaceId,
+        slug,
+        title: wp.title || slug,
+        content: wp.content || "",
+        summary: wp.summary || "",
+        page_type: mapPageType(wp.page_type),
+        source_document_id: null,
+        created_by: createdBy,
+      });
+
+      // Aliases, source_refs, page_metadata setzen
+      if (
+        (wp.aliases && wp.aliases.length > 0) ||
+        (wp.source_refs && wp.source_refs.length > 0) ||
+        (wp.page_metadata && Object.keys(wp.page_metadata).length > 0)
+      ) {
+        await db
+          .update(wikiPages)
+          .set({
+            aliases: wp.aliases || [],
+            source_refs: wp.source_refs || [],
+            page_metadata: wp.page_metadata || {},
+            updated_at: new Date(),
+          })
+          .where(
+            and(
+              eq(wikiPages.workspace_id, workspaceId),
+              eq(wikiPages.slug, slug),
+            ),
+          );
+      }
+
+      // out_links aus Content extrahieren
+      const { out_links } = await resolveLinks(workspaceId, page.content);
+      const combinedLinks = [
+        ...new Set([...out_links, ...(wp.out_links || [])]),
+      ];
+
+      if (combinedLinks.length > 0) {
+        await updatePage(workspaceId, slug, { out_links: combinedLinks });
+        await updateIncomingLinks(workspaceId, slug, combinedLinks);
+      }
+
+      importedPages.push({ ...page, slug });
+      imported++;
+    } catch (e: any) {
+      errors.push(`Error importing "${wp.title || wp.slug}": ${e.message}`);
+      skipped++;
+    }
+  }
+
+  return { imported, skipped, errors, pages: importedPages };
+}
+
 // --- Wiki Generation via LLM ---
 
 export async function generateWikiPage(
@@ -260,6 +399,11 @@ export async function generateWikiPage(
   summary: string;
   content: string;
 } | null> {
+  const t0 = Date.now();
+  console.log(`[wiki] ========== generateWikiPage START ==========`);
+  console.log(`[wiki] Document ID: ${documentId}`);
+  console.log(`[wiki] Workspace ID: ${workspaceId}`);
+  console.log(`[wiki] Existing slugs: ${existingSlugs.length}`);
   // Dokument laden
   const [doc] = await db
     .select()
@@ -267,7 +411,13 @@ export async function generateWikiPage(
     .where(eq(documents.id, documentId))
     .limit(1);
 
-  if (!doc || !doc.content) return null;
+  if (!doc || !doc.content) {
+    console.log(`[wiki] ❌ Dokument nicht gefunden oder leer (${documentId})`);
+    return null;
+  }
+  console.log(
+    `[wiki] Dokument geladen: "${doc.title}" (${doc.content.length} Zeichen)`,
+  );
 
   // Aktiven Chat-Provider laden
   const providers = await db
@@ -297,9 +447,16 @@ export async function generateWikiPage(
   }
 
   if (!provider) {
-    console.warn("[wiki] No chat provider configured for wiki generation");
+    console.warn(
+      "[wiki] ❌ Kein Chat-Provider für Wiki-Generierung konfiguriert",
+    );
     return null;
   }
+
+  console.log(
+    `[wiki] LLM-Provider: ${provider.provider_name || provider.provider_type} (${provider.default_model})`,
+  );
+  console.log(`[wiki] API-Base: ${provider.api_base_url}`);
 
   // Wiki-Seiten als Kontext für Verlinkungen
   const existingPages =
@@ -340,6 +497,10 @@ QUELLDOKUMENT:
 ${doc.content.slice(0, 15000)}`;
 
   try {
+    console.log(
+      `[wiki] Sende Prompt an LLM (${provider.default_model}, max_tokens=4096, timeout=60s)...`,
+    );
+    const llmT0 = Date.now();
     const response = await fetch(`${provider.api_base_url}/chat/completions`, {
       method: "POST",
       headers: {
@@ -354,13 +515,27 @@ ${doc.content.slice(0, 15000)}`;
       signal: AbortSignal.timeout(60000),
     });
 
+    const llmElapsed = Date.now() - llmT0;
+    console.log(
+      `[wiki] LLM antwortete nach ${llmElapsed}ms (Status: ${response.status})`,
+    );
+
     if (!response.ok) {
-      console.warn(`[wiki] LLM error: ${response.status}`);
+      const errBody = await response.text().catch(() => "");
+      console.warn(
+        `[wiki] ❌ LLM error: ${response.status} – ${errBody.slice(0, 200)}`,
+      );
       return null;
     }
 
     const data = await response.json();
     const fullText = data?.choices?.[0]?.message?.content || "";
+    console.log(`[wiki] LLM-Antwort: ${fullText.length} Zeichen`);
+
+    if (!fullText) {
+      console.warn(`[wiki] ❌ Leere LLM-Antwort`);
+      return null;
+    }
 
     // SUMMARY parsen
     const summaryMatch = fullText.match(/^SUMMARY:\s*(.+)/m);
@@ -379,9 +554,20 @@ ${doc.content.slice(0, 15000)}`;
         .replace(/-+/g, "-")
         .slice(0, 80);
 
+    console.log(
+      `[wiki] ✅ Wiki generiert: title="${title}", slug="${slug}", ${content.length} Zeichen`,
+    );
+    console.log(`[wiki] Summary: ${summary.slice(0, 100)}`);
+    console.log(
+      `[wiki] ========== generateWikiPage ENDE (${Date.now() - t0}ms) ==========`,
+    );
+
     return { slug, title, summary, content };
   } catch (e: any) {
-    console.error(`[wiki] Generation error:`, e.message);
+    console.error(`[wiki] ❌ Generation error:`, e.message);
+    console.log(
+      `[wiki] ========== generateWikiPage FEHLER (${Date.now() - t0}ms) ==========`,
+    );
     return null;
   }
 }

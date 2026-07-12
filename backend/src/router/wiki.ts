@@ -187,6 +187,52 @@ wikiRouter.get("/:workspaceId/stats", async (c) => {
   return c.json(stats);
 });
 
+// WeKnora Import – mehrere Wiki-Seiten auf einmal importieren
+const importSchema = z.object({
+  pages: z.array(
+    z.object({
+      slug: z.string().optional(),
+      title: z.string().min(1),
+      summary: z.string().optional(),
+      content: z.string().optional(),
+      page_type: z.string().optional(),
+      status: z.string().optional(),
+      out_links: z.array(z.string()).optional(),
+      in_links: z.array(z.string()).optional(),
+      aliases: z.array(z.string()).optional(),
+      source_refs: z.array(z.string()).optional(),
+      page_metadata: z.record(z.any()).optional(),
+      version: z.number().optional(),
+      created_at: z.string().optional(),
+      updated_at: z.string().optional(),
+    }),
+  ),
+  overwrite: z.boolean().optional().default(false),
+});
+
+wikiRouter.post(
+  "/:workspaceId/import",
+  zValidator("json", importSchema),
+  async (c) => {
+    const workspaceId = c.req.param("workspaceId");
+    const user = c.get("user");
+    const { pages, overwrite } = c.req.valid("json");
+
+    const result = await wikiService.importWeKnoraPages(
+      workspaceId,
+      pages,
+      user.id,
+    );
+
+    return c.json({
+      imported: result.imported,
+      skipped: result.skipped,
+      errors: result.errors.length > 0 ? result.errors : undefined,
+      pages: result.pages,
+    });
+  },
+);
+
 // Slug-Vorschläge (für Auto-Complete im Editor)
 wikiRouter.get("/:workspaceId/suggestions", async (c) => {
   const workspaceId = c.req.param("workspaceId");

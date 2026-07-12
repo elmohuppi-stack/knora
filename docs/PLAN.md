@@ -366,9 +366,9 @@ export const wikiPages = pgTable("wiki_pages", {
 
 ### 📥 Phase 4 – WeKnora Import & Dokumente
 
-15. [ ] `backend/src/scripts/knora-import.ts` – WeKnora-Wiki-Seiten importieren
-16. [ ] Import-UI: JSON-Datei hochladen / drag & drop
-17. [ ] YouTube-Import: oEmbed + Transcript API → Wiki-Seite
+15. [x] `backend/src/scripts/knora-import.ts` – WeKnora-Wiki-Seiten importieren (CLI)
+16. [x] `POST /api/v1/wiki/:workspaceId/import` – Import-Endpoint + Frontend-UI (Drag & Drop / Paste JSON)
+17. [x] YouTube-Import: oEmbed + Transcript API → Wiki-Seite (Backend + Frontend in DocumentList)
 18. [ ] URL-Import: Webseite scrapen → Markdown → Chunks
 
 ### 🧠 Phase 5 – Wiki-Generierung & Auto-Ingest

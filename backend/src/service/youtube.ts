@@ -1,5 +1,15 @@
 // YouTube Video Import Service
-// Inspiriert von WeKnora's youtube.go: oEmbed-Fallback + Transcript-API
+// Nutzt konfigurierbare Provider (Apify, Supadata oder Direktzugriff).
+// Auf Hetzner: Apify oder Supadata verwenden (YouTube ist von Hetzner-IPs gesperrt).
+//
+// Provider-Auswahl (via .env):
+//   YOUTUBE_TRANSCRIPT_PROVIDER=apify     (explizit)
+//   APIFY_API_KEY=...                      (auto-detect)
+//   SUPADATA_API_KEY=...                   (auto-detect)
+//   Weder noch → direkter Zugriff (nur lokal)
+
+import { createProvider, getConfig } from "./youtube/registry.ts";
+import type { YouTubeProvider } from "./youtube/types.ts";
 
 export interface YouTubeInfo {
   videoId: string;
@@ -11,6 +21,7 @@ export interface YouTubeInfo {
   description: string;
   transcript: string;
   transcriptLanguage: string;
+  transcriptSource: string;
 }
 
 // YouTube-URL Patterns (wie WeKnora)
@@ -21,6 +32,28 @@ const URL_PATTERNS = [
   /^(?:https?:\/\/)?(?:www\.)?youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
 ];
 
+/** Einmalig initialisierter Provider (lazy singleton) */
+let _provider: YouTubeProvider | null = null;
+
+function getProvider(): YouTubeProvider {
+  if (!_provider) {
+    _provider = createProvider();
+  }
+  return _provider;
+}
+
+/**
+ * Setzt den Provider zurück (nur für Tests).
+ * Nächster Aufruf von getProvider() erzeugt einen neuen.
+ */
+export function resetProvider(): void {
+  _provider = null;
+}
+
+/**
+ * Extrahiert die YouTube-Video-ID aus einer URL.
+ * Unterstützt: /watch?v=, youtu.be, /embed/, /shorts/
+ */
 export function extractVideoId(url: string): string | null {
   // Zuerst einfache "v" Parameter extrahieren
   try {
@@ -39,77 +72,74 @@ export function extractVideoId(url: string): string | null {
   return null;
 }
 
-// Metadaten via YouTube oEmbed API (kein API-Key nötig)
-async function fetchOEmbed(videoId: string): Promise<{
-  title: string;
-  authorName: string;
-  authorUrl: string;
-  thumbnailUrl: string;
-} | null> {
-  try {
-    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const resp = await fetch(
-      `https://www.youtube.com/oembed?url=${encodeURIComponent(videoUrl)}&format=json`,
-      { signal: AbortSignal.timeout(10000) },
+/**
+ * Ruft Metadaten + Transkript für ein YouTube-Video ab.
+ * Nutzt den konfigurierten Provider (Apify → Supadata → Direktzugriff).
+ *
+ * Apify: Ein Actor-Call liefert Metadaten UND Transkript (schnell).
+ * Supadata/Direct: Zwei separate Calls (parallel).
+ */
+export async function fetchYouTubeInfo(
+  videoId: string,
+): Promise<YouTubeInfo | null> {
+  const provider = getProvider();
+
+  console.log(`[youtube] ========== fetchYouTubeInfo START ==========`);
+  console.log(`[youtube] Video ID: ${videoId}`);
+  console.log(`[youtube] Provider: ${provider.name}`);
+  const t0 = Date.now();
+
+  const { metadata, transcript } = await provider.fetchVideoInfo(videoId);
+
+  const elapsed = Date.now() - t0;
+  console.log(
+    `[youtube] ========== fetchVideoInfo ENDE (${elapsed}ms) ==========`,
+  );
+  console.log(
+    `[youtube] Metadaten: ${metadata ? "✅" : "❌"} ${metadata?.title || ""}`,
+  );
+  console.log(
+    `[youtube] Transkript: ${transcript ? `✅ (${transcript.content.length} Zeichen, Sprache: ${transcript.language})` : "❌"}`,
+  );
+
+  if (!metadata && !transcript) {
+    console.warn(
+      `[youtube] FEHLER: Konnte KEINE Daten für Video ${videoId} abrufen`,
     );
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    return {
-      title: data.title || "",
-      authorName: data.author_name || "",
-      authorUrl: data.author_url || "",
-      thumbnailUrl: data.thumbnail_url || "",
-    };
-  } catch {
-    return null;
-  }
-}
-
-// Transkript via youtube-transcript npm package
-async function fetchTranscript(videoId: string): Promise<{
-  transcript: string;
-  language: string;
-} | null> {
-  try {
-    const { YoutubeTranscript } = await import("youtube-transcript");
-    const snippets = await YoutubeTranscript.fetchTranscript(videoId);
-    if (!snippets || snippets.length === 0) return null;
-
-    const text = snippets.map((s: any) => s.text).join(" ");
-    // Spracherkennung: erstes Snippet hat oft die Sprache
-    const language = snippets[0]?.lang || "unknown";
-
-    return { transcript: text, language };
-  } catch (e: any) {
-    console.warn(`[youtube] Transcript fetch failed:`, e.message);
-    return null;
-  }
-}
-
-// YouTube-VideoInfo mit oEmbed + Transkript
-export async function fetchYouTubeInfo(videoId: string): Promise<YouTubeInfo | null> {
-  const oembed = await fetchOEmbed(videoId);
-  const transcriptResult = await fetchTranscript(videoId);
-
-  if (!oembed && !transcriptResult) {
-    console.warn(`[youtube] Could not fetch any data for video ${videoId}`);
     return null;
   }
 
-  return {
+  const result = {
     videoId,
-    title: oembed?.title || `YouTube Video ${videoId}`,
-    channelName: oembed?.authorName || "",
-    channelUrl: oembed?.authorUrl || "",
-    duration: 0, // oEmbed liefert keine Dauer
-    thumbnailUrl: oembed?.thumbnailUrl || "",
-    description: `YouTube-Video von ${oembed?.authorName || "unbekannt"}`,
-    transcript: transcriptResult?.transcript || "",
-    transcriptLanguage: transcriptResult?.language || "unknown",
+    title: metadata?.title || `YouTube Video ${videoId}`,
+    channelName: metadata?.channelName || "",
+    channelUrl: metadata?.channelUrl || "",
+    duration: metadata?.duration || 0,
+    thumbnailUrl: metadata?.thumbnailUrl || "",
+    description:
+      metadata?.description ||
+      `YouTube-Video von ${metadata?.channelName || "unbekannt"}`,
+    transcript: transcript?.content || "",
+    transcriptLanguage: transcript?.language || "unknown",
+    transcriptSource: transcript?.source || "unknown",
   };
+
+  console.log(`[youtube] Dokument-Titel: "${result.title}"`);
+  console.log(
+    `[youtube] Transkript-Länge: ${result.transcript.length} Zeichen`,
+  );
+  if (result.transcript.length > 0) {
+    console.log(
+      `[youtube] Transkript-Preview: ${result.transcript.slice(0, 200)}...`,
+    );
+  }
+
+  return result;
 }
 
-// Text für Chunking aufbereiten (Transkript + Metadaten)
+/**
+ * Baut den Text für Chunking/Embedding aus den YouTube-Info-Daten.
+ */
 export function buildDocumentContent(info: YouTubeInfo): string {
   const parts: string[] = [];
 
@@ -119,10 +149,17 @@ export function buildDocumentContent(info: YouTubeInfo): string {
   parts.push(`**URL**: https://www.youtube.com/watch?v=${info.videoId}`);
   parts.push(``);
 
+  if (info.description) {
+    parts.push(`**Beschreibung**: ${info.description}`);
+    parts.push(``);
+  }
+
   if (info.transcript) {
     parts.push(`## Transkript\n`);
     parts.push(info.transcript);
   }
 
-  return parts.join("\n");
+  const result = parts.join("\n");
+  console.log(`[youtube] buildDocumentContent: ${result.length} Zeichen`);
+  return result;
 }

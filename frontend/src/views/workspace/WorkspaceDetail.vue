@@ -1,131 +1,123 @@
 <template>
   <main class="main-content">
-      <div class="header">
-        <router-link to="/workspaces" class="back-link"
-          >← Übersicht</router-link
-        >
-        <h3>{{ ws?.name || "Lädt..." }}</h3>
-        <div class="header-actions">
-          <button class="btn-secondary" @click="showEdit = true" v-if="ws">
-            Bearbeiten
-          </button>
-          <button class="btn-danger" @click="deleteWs" v-if="ws">
-            Löschen
-          </button>
+    <div class="header">
+      <router-link to="/workspaces" class="back-link">← Übersicht</router-link>
+      <h3>{{ ws?.name || "Lädt..." }}</h3>
+      <div class="header-actions">
+        <button class="btn-secondary" @click="showEdit = true" v-if="ws">
+          Bearbeiten
+        </button>
+        <button class="btn-danger" @click="deleteWs" v-if="ws">Löschen</button>
+      </div>
+    </div>
+
+    <div class="content">
+      <div v-if="!ws" class="loading">Lade Workspace...</div>
+
+      <template v-else>
+        <div class="detail-section">
+          <h4>Beschreibung</h4>
+          <p>{{ ws.description || "Keine Beschreibung" }}</p>
         </div>
-      </div>
 
-      <div class="content">
-        <div v-if="!ws" class="loading">Lade Workspace...</div>
+        <div class="detail-grid">
+          <div class="detail-card">
+            <strong>Chunk Size</strong>
+            <span>{{ ws.chunk_size }} Tokens</span>
+          </div>
+          <div class="detail-card">
+            <strong>Chunk Overlap</strong>
+            <span>{{ ws.chunk_overlap }} Tokens</span>
+          </div>
+          <div class="detail-card">
+            <strong>Erstellt am</strong>
+            <span>{{ formatDate(ws.created_at) }}</span>
+          </div>
+        </div>
 
-        <template v-else>
-          <div class="detail-section">
-            <h4>Beschreibung</h4>
-            <p>{{ ws.description || "Keine Beschreibung" }}</p>
+        <div class="detail-section">
+          <h4>Indexing Strategy</h4>
+          <div class="indexing-grid">
+            <label class="toggle-row">
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.vector_enabled"
+                disabled
+              />
+              <span>🔍 Vector Search</span>
+            </label>
+            <label class="toggle-row">
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.keyword_enabled"
+                disabled
+              />
+              <span>📄 Keyword Search</span>
+            </label>
+            <label class="toggle-row">
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.wiki_enabled"
+                disabled
+              />
+              <span>📖 Wiki Auto-Generierung</span>
+            </label>
+            <label class="toggle-row">
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.graph_enabled"
+                disabled
+              />
+              <span>🕸️ Knowledge Graph</span>
+            </label>
           </div>
+        </div>
 
-          <div class="detail-grid">
-            <div class="detail-card">
-              <strong>Chunk Size</strong>
-              <span>{{ ws.chunk_size }} Tokens</span>
-            </div>
-            <div class="detail-card">
-              <strong>Chunk Overlap</strong>
-              <span>{{ ws.chunk_overlap }} Tokens</span>
-            </div>
-            <div class="detail-card">
-              <strong>Erstellt am</strong>
-              <span>{{ formatDate(ws.created_at) }}</span>
-            </div>
-          </div>
-
-          <div class="detail-section">
-            <h4>Indexing Strategy</h4>
-            <div class="indexing-grid">
-              <label class="toggle-row">
-                <input
-                  type="checkbox"
-                  v-model="ws.indexing_strategy.vector_enabled"
-                  disabled
-                />
-                <span>🔍 Vector Search</span>
-              </label>
-              <label class="toggle-row">
-                <input
-                  type="checkbox"
-                  v-model="ws.indexing_strategy.keyword_enabled"
-                  disabled
-                />
-                <span>📄 Keyword Search</span>
-              </label>
-              <label class="toggle-row">
-                <input
-                  type="checkbox"
-                  v-model="ws.indexing_strategy.wiki_enabled"
-                  disabled
-                />
-                <span>📖 Wiki Auto-Generierung</span>
-              </label>
-              <label class="toggle-row">
-                <input
-                  type="checkbox"
-                  v-model="ws.indexing_strategy.graph_enabled"
-                  disabled
-                />
-                <span>🕸️ Knowledge Graph</span>
-              </label>
-            </div>
-          </div>
-
-          <div class="detail-section">
-            <h4>Aktionen</h4>
-            <div class="action-buttons">
-              <button
-                class="btn-primary"
-                @click="$router.push('/documents/' + ws.id)"
-              >
-                📄 Dokumente
-              </button>
-              <button
-                class="btn-primary"
-                @click="$router.push('/wiki/' + ws.id)"
-              >
-                📖 Wiki
-              </button>
-              <button class="btn-primary" @click="$router.push('/chat')">
-                💬 Chat
-              </button>
-            </div>
-          </div>
-        </template>
-      </div>
-
-      <!-- Edit Dialog -->
-      <div
-        v-if="showEdit && ws"
-        class="dialog-overlay"
-        @click.self="showEdit = false"
-      >
-        <div class="dialog">
-          <h3>Workspace bearbeiten</h3>
-          <div class="field">
-            <label>Name</label>
-            <input v-model="editName" />
-          </div>
-          <div class="field">
-            <label>Beschreibung</label>
-            <textarea v-model="editDesc"></textarea>
-          </div>
-          <div class="dialog-actions">
-            <button class="btn-secondary" @click="showEdit = false">
-              Abbrechen
+        <div class="detail-section">
+          <h4>Aktionen</h4>
+          <div class="action-buttons">
+            <button
+              class="btn-primary"
+              @click="$router.push('/documents/' + ws.id)"
+            >
+              📄 Dokumente
             </button>
-            <button class="btn-primary" @click="updateWs">Speichern</button>
+            <button class="btn-primary" @click="$router.push('/wiki/' + ws.id)">
+              📖 Wiki
+            </button>
+            <button class="btn-primary" @click="$router.push('/chat')">
+              💬 Chat
+            </button>
           </div>
         </div>
+      </template>
+    </div>
+
+    <!-- Edit Dialog -->
+    <div
+      v-if="showEdit && ws"
+      class="dialog-overlay"
+      @click.self="showEdit = false"
+    >
+      <div class="dialog">
+        <h3>Workspace bearbeiten</h3>
+        <div class="field">
+          <label>Name</label>
+          <input v-model="editName" />
+        </div>
+        <div class="field">
+          <label>Beschreibung</label>
+          <textarea v-model="editDesc"></textarea>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn-secondary" @click="showEdit = false">
+            Abbrechen
+          </button>
+          <button class="btn-primary" @click="updateWs">Speichern</button>
+        </div>
       </div>
-    </main>
-  </div>
+    </div>
+  </main>
 </template>
 
 <script setup lang="ts">
@@ -286,6 +278,7 @@ function formatDate(dateStr: string) {
 .btn-secondary {
   padding: 0.5rem 1rem;
   background: var(--color-bg-secondary);
+  color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: 0.9rem;

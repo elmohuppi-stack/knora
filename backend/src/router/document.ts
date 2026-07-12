@@ -3,7 +3,11 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { authMiddleware } from "../middleware/auth.ts";
 import * as documentService from "../service/document.ts";
-import { extractVideoId, fetchYouTubeInfo, buildDocumentContent } from "../service/youtube.ts";
+import {
+  extractVideoId,
+  fetchYouTubeInfo,
+  buildDocumentContent,
+} from "../service/youtube.ts";
 
 const documentRouter = new Hono();
 documentRouter.use("*", authMiddleware);
@@ -130,72 +134,74 @@ const youTubeSchema = z.object({
   url: z.string(),
 });
 
-documentRouter.post("/import-youtube", zValidator("json", youTubeSchema), async (c) => {
-  const user = c.get("user");
-  const { workspace_id, url } = c.req.valid("json");
+documentRouter.post(
+  "/import-youtube",
+  zValidator("json", youTubeSchema),
+  async (c) => {
+    const user = c.get("user");
+    const { workspace_id, url } = c.req.valid("json");
 
-  const videoId = extractVideoId(url);
-  if (!videoId) {
-    return c.json({ error: "Invalid YouTube URL" }, 400);
-  }
+    console.log(`[doc] ========== YouTube-Import gestartet ==========`);
+    console.log(`[doc] URL: ${url}`);
+    console.log(`[doc] Workspace: ${workspace_id}`);
+    console.log(`[doc] User: ${user.id} (${user.email})`);
 
-  const info = await fetchYouTubeInfo(videoId);
-  if (!info) {
-    return c.json({ error: "Could not fetch video information" }, 400);
-  }
-
-  const content = buildDocumentContent(info);
-
-  const doc = await documentService.createDocument({
-    id: crypto.randomUUID(),
-    workspace_id,
-    title: info.title,
-    type: "youtube",
-    source: url,
-    source_url: `https://www.youtube.com/watch?v=${videoId}`,
-    content,
-    created_by: user.id,
-  });
-
-  // Wiki-Artikel generieren (async)
-  scheduleChunking(doc.id, workspace_id, content);
-
-  // Wiki-generierung triggern (existierende Slugs holen)
-  try {
-    const { listPages, generateWikiPage, createPage, resolveLinks, updateIncomingLinks } = await import("../service/wiki.ts");
-    const existing = await listPages(workspace_id, { page_size: 200 });
-    const existingSlugs = existing.pages.map((p: any) => p.slug);
-    const wikiResult = await generateWikiPage(workspace_id, doc.id, existingSlugs);
-    if (wikiResult) {
-      let slug = wikiResult.slug;
-      let counter = 1;
-      while (existingSlugs.includes(slug)) { slug = `${wikiResult.slug}-${counter}`; counter++; }
-      const page = await createPage({
-        workspace_id,
-        slug,
-        title: wikiResult.title,
-        content: wikiResult.content,
-        summary: wikiResult.summary,
-        page_type: "article",
-        source_document_id: doc.id,
-        created_by: user.id,
-      });
-      const { out_links } = await resolveLinks(workspace_id, wikiResult.content);
-      if (out_links.length > 0) {
-        try {
-          const { updatePage } = await import("../service/wiki.ts");
-          await updatePage(workspace_id, slug, { out_links });
-          await updateIncomingLinks(workspace_id, slug, out_links);
-        } catch {}
-      }
-      return c.json({ document: doc, wiki_page: { slug: page.slug, title: page.title } }, 201);
+    const videoId = extractVideoId(url);
+    if (!videoId) {
+      console.log(`[doc] ❌ Ungültige YouTube-URL: ${url}`);
+      return c.json({ error: "Invalid YouTube URL" }, 400);
     }
-  } catch (e: any) {
-    console.warn(`[youtube] Wiki generation skipped:`, e.message);
-  }
+    console.log(`[doc] Video-ID: ${videoId}`);
 
-  return c.json({ document: doc }, 201);
-});
+    const t0 = Date.now();
+    console.log(`[doc] Rufe YouTube-Info ab (fetchYouTubeInfo)...`);
+    const info = await fetchYouTubeInfo(videoId);
+    const fetchElapsed = Date.now() - t0;
+    console.log(`[doc] fetchYouTubeInfo dauerte ${fetchElapsed}ms`);
+
+    if (!info) {
+      console.log(`[doc] ❌ Konnte keine Video-Informationen abrufen`);
+      return c.json({ error: "Could not fetch video information" }, 400);
+    }
+
+    console.log(`[doc] ✅ Video-Titel: "${info.title}"`);
+    console.log(`[doc] ✅ Kanal: ${info.channelName}`);
+    console.log(`[doc] ✅ Dauer: ${info.duration}s`);
+    console.log(
+      `[doc] ✅ Transkript: ${info.transcript.length} Zeichen (${info.transcriptLanguage})`,
+    );
+
+    const content = buildDocumentContent(info);
+    console.log(`[doc] Dokument-Content: ${content.length} Zeichen`);
+
+    const doc = await documentService.createDocument({
+      id: crypto.randomUUID(),
+      workspace_id,
+      title: info.title,
+      type: "youtube",
+      source: url,
+      source_url: `https://www.youtube.com/watch?v=${videoId}`,
+      content,
+      created_by: user.id,
+    });
+    console.log(`[doc] ✅ Dokument erstellt: ${doc.id}`);
+
+    // Chunking starten (async)
+    console.log(`[doc] Starte Chunking für ${doc.id}...`);
+    scheduleChunking(doc.id, workspace_id, content);
+
+    // Wiki-Artikel asynchron generieren (mit Delay, damit DB-Connection frei wird)
+    setTimeout(
+      () => scheduleWikiGeneration(doc.id, workspace_id, user.id),
+      500,
+    );
+
+    console.log(
+      `[doc] ========== YouTube-Import abgeschlossen (${Date.now() - t0}ms) ==========`,
+    );
+    return c.json({ document: doc }, 201);
+  },
+);
 
 // Dokument löschen
 documentRouter.delete("/:id", async (c) => {
@@ -244,6 +250,87 @@ async function scheduleChunking(
     console.error(`[doc] Parse error ${docId}:`, e.message);
     await documentService.updateDocumentStatus(docId, "failed", e.message);
   }
+}
+
+/** Wiki-Artikel asynchron generieren (Blockiert nicht den HTTP-Response) */
+async function scheduleWikiGeneration(
+  docId: string,
+  workspaceId: string,
+  userId: number,
+) {
+  console.log(`[doc] ========== scheduleWikiGeneration START ==========`);
+  console.log(`[doc] Erstelle Wiki-Artikel für Dokument ${docId}...`);
+
+  try {
+    const {
+      listPages,
+      generateWikiPage,
+      createPage,
+      resolveLinks,
+      updateIncomingLinks,
+      updatePage,
+    } = await import("../service/wiki.ts");
+
+    console.log(`[doc] Lade existierende Wiki-Seiten...`);
+    const existing = await listPages(workspaceId, { page_size: 200 });
+    const existingSlugs = existing.pages.map((p: any) => p.slug);
+    console.log(
+      `[doc] ${existing.pages.length} existierende Wiki-Seiten gefunden`,
+    );
+
+    console.log(`[doc] Rufe LLM zur Wiki-Generierung auf...`);
+    const wikiResult = await generateWikiPage(
+      workspaceId,
+      docId,
+      existingSlugs,
+    );
+
+    if (wikiResult) {
+      let slug = wikiResult.slug;
+      let counter = 1;
+      while (existingSlugs.includes(slug)) {
+        slug = `${wikiResult.slug}-${counter}`;
+        counter++;
+      }
+      console.log(
+        `[doc] Wiki-Seite wird erstellt: slug="${slug}", title="${wikiResult.title}"`,
+      );
+      const page = await createPage({
+        workspace_id: workspaceId,
+        slug,
+        title: wikiResult.title,
+        content: wikiResult.content,
+        summary: wikiResult.summary,
+        page_type: "article",
+        source_document_id: docId,
+        created_by: userId,
+      });
+      const { out_links } = await resolveLinks(workspaceId, wikiResult.content);
+      if (out_links.length > 0) {
+        try {
+          await updatePage(workspaceId, slug, { out_links });
+          await updateIncomingLinks(workspaceId, slug, out_links);
+          console.log(`[doc] ${out_links.length} Wiki-Links aufgelöst`);
+        } catch (linkErr: any) {
+          console.warn(
+            `[doc] Link-Resolution fehlgeschlagen:`,
+            linkErr.message,
+          );
+        }
+      }
+      console.log(
+        `[doc] ✅ Wiki-Artikel "${page.title}" erstellt (slug: ${page.slug})`,
+      );
+    } else {
+      console.log(
+        `[doc] ⚠️ Wiki-Generierung ergab kein Ergebnis (kein LLM-Provider?)`,
+      );
+    }
+  } catch (e: any) {
+    console.warn(`[doc] ❌ Wiki-Generierung fehlgeschlagen:`, e.message);
+  }
+
+  console.log(`[doc] ========== scheduleWikiGeneration ENDE ==========`);
 }
 
 async function fetchAndParseUrl(docId: string, url: string) {

@@ -388,6 +388,7 @@ function formatDate(dateStr: string) {
 .btn-secondary {
   padding: 0.5rem 1rem;
   background: var(--color-bg-secondary);
+  color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: 0.9rem;

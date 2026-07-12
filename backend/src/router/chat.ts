@@ -203,33 +203,48 @@ chatRouter.post("/stream", zValidator("json", chatSchema), async (c) => {
     });
   }
 
-  // Stream mit Vercel AI SDK
+  // Stream mit rohem fetch (OpenAI-kompatibel)
   const systemPrompt = buildSystemPrompt(context);
 
-  const aiStream = await streamText({
-    model: openai.chat(provider.default_model, {
-      baseURL: provider.api_base_url,
-      apiKey: provider.api_key_encrypted,
+  const response = await fetch(`${provider.api_base_url}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${provider.api_key_encrypted}`,
+    },
+    body: JSON.stringify({
+      model: provider.default_model,
+      stream: true,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: message },
+      ],
+      max_tokens: 1024,
     }),
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: message },
-    ],
-    maxTokens: 1024,
   });
 
-  // Vollständige Antwort für DB-Speicherung sammeln
-  let fullReply = "";
+  if (!response.ok) {
+    const errText = await response.text();
+    return c.json({
+      session_id: session.id,
+      message: {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: `❌ API-Fehler (${response.status}): ${errText.slice(0, 200)}`,
+        knowledge_refs: [],
+      },
+      sources: [],
+    });
+  }
 
-  // Text-Stream in einen transformierenden Stream verwandeln,
-  // der gleichzeitig den vollständigen Text sammelt
+  // SSE-Stream parsen und als Text-Stream ausgeben
+  let fullReply = "";
   const { readable, writable } = new TransformStream<string, string>({
     transform(chunk, controller) {
       fullReply += chunk;
       controller.enqueue(chunk);
     },
     flush() {
-      // Nach dem Stream: Antwort in DB speichern
       db.insert(chatMessages)
         .values({
           id: crypto.randomUUID(),
@@ -247,8 +262,47 @@ chatRouter.post("/stream", zValidator("json", chatSchema), async (c) => {
     },
   });
 
-  // Stream durch den Transform leiten
-  aiStream.textStream.pipeTo(writable).catch(console.error);
+  // SSE-Datenstrom parsen: "data: {...}" → Text extrahieren
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+  const textWriter = writable.getWriter();
+
+  if (reader) {
+    (async () => {
+      let buffer = "";
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const data = line.slice(6).trim();
+              if (data === "[DONE]") continue;
+              try {
+                const json = JSON.parse(data);
+                const delta =
+                  json.choices?.[0]?.delta?.content ||
+                  json.choices?.[0]?.text ||
+                  "";
+                if (delta) textWriter.write(delta);
+              } catch {
+                // JSON-Parse-Fehler ignorieren
+              }
+            }
+          }
+        }
+      } finally {
+        textWriter.close();
+      }
+    })();
+  } else {
+    textWriter.close();
+  }
 
   return createTextStreamResponse({
     stream: readable,

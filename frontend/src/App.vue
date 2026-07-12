@@ -25,6 +25,13 @@
         </router-link>
       </nav>
       <div class="sidebar-footer">
+        <button
+          class="theme-toggle"
+          @click="toggleTheme"
+          :title="isDark ? 'Helles Design' : 'Dunkles Design'"
+        >
+          <i :class="isDark ? 'pi pi-sun' : 'pi pi-moon'"></i>
+        </button>
         <span class="sidebar-user">{{ auth.userName }}</span>
         <button class="sidebar-logout" @click="logout">Abmelden</button>
       </div>
@@ -46,11 +53,34 @@
 </template>
 
 <script setup lang="ts">
+import { ref, onMounted, watch } from "vue";
 import { useAuthStore } from "./stores/auth";
 import { useRouter } from "vue-router";
 
 const auth = useAuthStore();
 const router = useRouter();
+
+const isDark = ref(localStorage.getItem("knora-theme") === "dark");
+
+onMounted(() => {
+  applyTheme();
+});
+
+watch(isDark, () => {
+  applyTheme();
+  localStorage.setItem("knora-theme", isDark.value ? "dark" : "light");
+});
+
+function applyTheme() {
+  document.documentElement.setAttribute(
+    "data-theme",
+    isDark.value ? "dark" : "light",
+  );
+}
+
+function toggleTheme() {
+  isDark.value = !isDark.value;
+}
 
 function logout() {
   auth.logout();
@@ -64,12 +94,39 @@ function logout() {
 :root {
   --sidebar-width: 260px;
   --header-height: 56px;
+}
+
+/* Light Theme (default) */
+:root,
+[data-theme="light"] {
   --color-sidebar-bg: #1a1a2e;
   --color-sidebar-text: #e0e0e0;
   --color-sidebar-hover: #16213e;
   --color-sidebar-active: #0f3460;
   --color-header-bg: #ffffff;
   --color-content-bg: #f5f7fa;
+  --color-text: #1a1a1a;
+  --color-text-secondary: #6b7280;
+  --color-border: #e5e7eb;
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f3f4f6;
+  --color-primary: #1a1a2e;
+}
+
+/* Dark Theme */
+[data-theme="dark"] {
+  --color-sidebar-bg: #0d0d1a;
+  --color-sidebar-text: #c0c0c0;
+  --color-sidebar-hover: #1a1a2e;
+  --color-sidebar-active: #0f3460;
+  --color-header-bg: #1a1a2e;
+  --color-content-bg: #111118;
+  --color-text: #e0e0e0;
+  --color-text-secondary: #9ca3af;
+  --color-border: #2d2d3a;
+  --color-bg: #1a1a2e;
+  --color-bg-secondary: #16162a;
+  --color-primary: #4f8cff;
 }
 
 * {
@@ -83,7 +140,7 @@ body {
   height: 100%;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  color: #1a1a1a;
+  color: var(--color-text);
   background: var(--color-content-bg);
   line-height: 1.6;
 }
@@ -164,8 +221,11 @@ body {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
+}
+
+.sidebar-footer .sidebar-user {
+  flex: 1;
 }
 
 .sidebar-user {
@@ -175,6 +235,28 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.theme-toggle {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--color-sidebar-text);
+  font-size: 0.85rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.theme-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .sidebar-logout {
@@ -207,7 +289,7 @@ body {
 .app-header {
   height: var(--header-height);
   background: var(--color-header-bg);
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -218,7 +300,7 @@ body {
 .app-title {
   font-size: 1.1rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--color-text);
 }
 
 .app-content {

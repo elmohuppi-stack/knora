@@ -191,6 +191,19 @@ async function loadUsers() {
   try {
     const res = await axios.get("/api/v1/admin/users");
     users.value = res.data.users || [];
+
+    // .env-Admin (Elmo) zur Liste hinzufügen falls nicht in DB
+    const envAdmin = auth.user;
+    if (envAdmin && !users.value.find((u: any) => u.email === envAdmin.email)) {
+      users.value.unshift({
+        id: 0,
+        name: envAdmin.name,
+        email: envAdmin.email,
+        role: "admin",
+        created_at: new Date().toISOString(),
+        _env: true, // Markierung für .env-User
+      });
+    }
   } catch (e: any) {
     console.error("Failed to load users", e);
   }
@@ -276,6 +289,7 @@ function formatDate(dateStr: string) {
   background: none;
   font-size: 0.9rem;
   cursor: pointer;
+  color: var(--color-text);
   border-bottom: 2px solid transparent;
 }
 .tab.active {
@@ -396,6 +410,7 @@ function formatDate(dateStr: string) {
 .btn-secondary {
   padding: 0.5rem 1rem;
   background: var(--color-bg-secondary);
+  color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: 0.9rem;

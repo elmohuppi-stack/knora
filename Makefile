@@ -1,9 +1,9 @@
 BUN := $(shell command -v bun 2>/dev/null || echo ~/.bun/bin/bun)
 HOST ?= $(DEPLOY_HOST)
 
-.PHONY: help start stop dev dev-frontend dev-all build migrate db-generate \
-        seed shell-backend install deploy docker-build docker-up docker-down \
-        logs status
+.PHONY: help start stop dev dev-frontend dev-all restart kill rebuild \
+        build migrate db-generate seed shell-backend install deploy \
+        docker-build docker-up docker-down logs status
 
 help: ## 📖 Zeigt diese Hilfe an
 	@echo ""
@@ -19,6 +19,9 @@ help: ## 📖 Zeigt diese Hilfe an
 	@echo "  make dev             Backend starten (Bun, Port 3000, Hot-Reload)"
 	@echo "  make dev-frontend    Frontend starten (Vite, Port 5173, HMR)"
 	@echo "  make dev-all         Services + Backend + Frontend starten"
+	@echo "  make kill            Alle lokalen Prozesse beenden (Backend + Frontend)"
+	@echo "  make restart         Komplett-Neustart (kill + start)"
+	@echo "  make rebuild         Komplett-Neustart mit Neuinstallation"
 	@echo "  make stop            Docker-Services stoppen"
 	@echo "  make logs            Docker-Services Logs anzeigen"
 	@echo "  make status          Docker-Services Status prüfen"
@@ -75,7 +78,7 @@ dev-all: ## 🚀🔥 Alles starten (Services + Backend + Frontend)
 	@echo "🚀 Starte PostgreSQL (falls nicht bereits laufend)..."
 	@docker compose -f docker-compose.dev.yml up -d db 2>/dev/null || true
 	@echo ""
-	@if lsof -i:3000 >/dev/null 2>&1; then \
+	@if lsof -t -i:3000 >/dev/null 2>&1; then \
 		echo "⚠️  Backend läuft bereits auf Port 3000 (überspringe)"; \
 	else \
 		echo "🔥 Starte Backend (Port 3000)..."; \
@@ -83,12 +86,35 @@ dev-all: ## 🚀🔥 Alles starten (Services + Backend + Frontend)
 		sleep 2; \
 	fi
 	@echo ""
-	@if lsof -i:5173 >/dev/null 2>&1; then \
+	@if lsof -t -i:5173 >/dev/null 2>&1; then \
 		echo "⚠️  Frontend läuft bereits auf Port 5173 (überspringe)"; \
 	else \
 		echo "💻 Starte Frontend (Port 5173)..."; \
 		cd frontend && $(BUN) run dev; \
 	fi
+
+kill: ## 🛑 Alle lokalen Prozesse beenden (Backend + Frontend)
+	@echo "🛑 Beende Backend (Port 3000)..."
+	@lsof -t -i:3000 2>/dev/null | xargs kill -9 2>/dev/null || echo "   Kein Prozess auf Port 3000"
+	@echo "🛑 Beende Frontend (Port 5173)..."
+	@lsof -t -i:5173 2>/dev/null | xargs kill -9 2>/dev/null || echo "   Kein Prozess auf Port 5173"
+	@sleep 1
+	@echo "✅ Alle Prozesse beendet"
+
+restart: kill dev-all ## 🔄 Komplett-Neustart (kill + PostgreSQL + Backend + Frontend)
+	@echo ""
+	@echo "✅ Neustart abgeschlossen!"
+	@echo "   Frontend: http://localhost:5173"
+	@echo "   Backend:  http://localhost:3000"
+
+rebuild: kill ## 🔨 Komplett-Neustart mit Neuinstallation
+	@echo "📦 Installiere Abhängigkeiten..."
+	@cd packages/shared && $(BUN) install --frozen-lockfile 2>/dev/null || cd packages/shared && $(BUN) install
+	@cd backend && $(BUN) install --frozen-lockfile 2>/dev/null || cd backend && $(BUN) install
+	@cd frontend && $(BUN) install --frozen-lockfile 2>/dev/null || cd frontend && $(BUN) install
+	@$(BUN) install --frozen-lockfile 2>/dev/null || $(BUN) install
+	@echo ""
+	@$(MAKE) dev-all
 
 logs: ## 📋 Docker-Services Logs anzeigen
 	docker compose -f docker-compose.dev.yml logs -f
