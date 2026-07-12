@@ -315,49 +315,53 @@ async function scheduleWikiGeneration(
     );
 
     console.log(`[doc] Rufe LLM zur Wiki-Generierung auf...`);
-    const wikiResult = await generateWikiPage(
+    const wikiResults = await generateWikiPage(
       workspaceId,
       docId,
       existingSlugs,
     );
 
-    if (wikiResult) {
-      let slug = wikiResult.slug;
-      let counter = 1;
-      while (existingSlugs.includes(slug)) {
-        slug = `${wikiResult.slug}-${counter}`;
-        counter++;
-      }
-      console.log(
-        `[doc] Wiki-Seite wird erstellt: slug="${slug}", title="${wikiResult.title}"`,
-      );
-      const page = await createPage({
-        workspace_id: workspaceId,
-        slug,
-        title: wikiResult.title,
-        content: wikiResult.content,
-        summary: wikiResult.summary,
-        page_type: "article",
-        source_document_id: docId,
-        created_by: userId,
-      });
-      const { out_links } = await resolveLinks(workspaceId, wikiResult.content);
-      if (out_links.length > 0) {
-        try {
-          await updatePage(workspaceId, slug, { out_links });
-          await updateIncomingLinks(workspaceId, slug, out_links);
-          console.log(`[doc] ${out_links.length} Wiki-Links aufgelöst`);
-        } catch (linkErr: any) {
-          console.warn(
-            `[doc] Link-Resolution fehlgeschlagen:`,
-            linkErr.message,
-          );
+    if (wikiResults && wikiResults.length > 0) {
+      const createdPages: string[] = [];
+      const allSlugs = [...existingSlugs];
+
+      for (const article of wikiResults) {
+        let slug = article.slug;
+        let counter = 1;
+        while (allSlugs.includes(slug)) {
+          slug = `${article.slug}-${counter}`;
+          counter++;
+        }
+        allSlugs.push(slug);
+
+        console.log(`[doc] Wiki-Seite wird erstellt: slug="${slug}", title="${article.title}"`);
+        const page = await createPage({
+          workspace_id: workspaceId,
+          slug,
+          title: article.title,
+          content: article.content,
+          summary: article.summary,
+          page_type: article.page_type,
+          source_document_id: docId,
+          created_by: userId,
+        });
+        createdPages.push(page.title);
+
+        const { out_links } = await resolveLinks(workspaceId, article.content);
+        if (out_links.length > 0) {
+          try {
+            await updatePage(workspaceId, slug, { out_links });
+            await updateIncomingLinks(workspaceId, slug, out_links);
+            console.log(`[doc] ${out_links.length} Wiki-Links für "${slug}" aufgelöst`);
+          } catch (linkErr: any) {
+            console.warn(`[doc] Link-Resolution fehlgeschlagen:`, linkErr.message);
+          }
         }
       }
 
       await updateLog(logId, {
         status: "completed",
-        message: `Wiki-Artikel „${wikiResult.title}” erstellt`,
+        message: `${createdPages.length} Wiki-Seiten erstellt: ${createdPages.join(", ")}`,
         details: {
           title: wikiResult.title,
           slug,
@@ -365,9 +369,7 @@ async function scheduleWikiGeneration(
         },
         duration_ms: Date.now() - t0,
       });
-      console.log(
-        `[doc] ✅ Wiki-Artikel "${page.title}" erstellt (slug: ${page.slug})`,
-      );
+      console.log(`[doc] ✅ ${createdPages.length} Wiki-Seiten erstellt`);
     } else {
       await updateLog(logId, {
         status: "failed",

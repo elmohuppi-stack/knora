@@ -393,17 +393,21 @@ export async function generateWikiPage(
   workspaceId: string,
   documentId: string,
   existingSlugs: string[],
-): Promise<{
-  slug: string;
-  title: string;
-  summary: string;
-  content: string;
-} | null> {
+): Promise<
+  Array<{
+    slug: string;
+    title: string;
+    summary: string;
+    content: string;
+    page_type: string;
+  }> | null
+> {
   const t0 = Date.now();
   console.log(`[wiki] ========== generateWikiPage START ==========`);
   console.log(`[wiki] Document ID: ${documentId}`);
   console.log(`[wiki] Workspace ID: ${workspaceId}`);
   console.log(`[wiki] Existing slugs: ${existingSlugs.length}`);
+
   // Dokument laden
   const [doc] = await db
     .select()
@@ -476,25 +480,55 @@ export async function generateWikiPage(
     .map((p) => `  - [[${p.slug}|${p.title}]]`)
     .join("\n");
 
-  const systemPrompt = `Du bist ein Wiki-Autor. Erstelle einen gut strukturierten Wiki-Artikel aus dem folgenden Dokument.
+  // Ungefähre Videolänge aus dem Titel/Inhalt schätzen
+  // Fallback: 1000 Zeichen ≈ 10 Minuten Transkript
+  const estimatedHours = Math.max(0.1, doc.content.length / 60000);
 
-FORMAT:
+  const systemPrompt = `Du bist ein Wiki-Autor. Erstelle aus dem folgenden YouTube-Transkript **zwei** separate Wiki-Artikel auf Deutsch.
+
+## WICHTIGE PRIORISIERUNG
+Die YouTube-Metadaten (Titel, Kanal, Beschreibung) haben die HÖCHSTE Priorität für:
+- Korrekte Schreibweise von Namen, Begriffen und Gesprächspartnern
+- Kontext und Einordnung des Gesprächs
+Diese Metadaten stehen ganz oben im Quelldokument und sind massgeblich.
+
+## ARTIKEL 1 – Vollständiger Inhalt (Tag: VOLLSTAENDIG)
+- Erfasst das GESAMTE Gespräch mit ALLEN Argumenten, Thesen, Details und Inhalten
+- Vollständig, keine Kürzung, kein Weglassen von Argumenten
+- Geschätzte Videolänge: ~${estimatedHours.toFixed(1)}h → angemessene Länge wählen
+- Struktur mit ## Überschriften, die den Gesprächsverlauf abbilden
+- Enthält am Ende einen Verweis auf die Zusammenfassung: [[zusammenfassung-{slug}|Zusammenfassung]]
+
+## ARTIKEL 2 – Zusammenfassung (Tag: ZUSAMMENFASSUNG)
+- Konzentriert sich auf die 5-10 wichtigsten Thesen und Kernaussagen
+- Maximal 1000-1500 Wörter, unabhängig von der Videolänge
+- Struktur: ## Wichtigste Thesen als Bullet-Points mit kurzer Erklärung
+- Enthält am Ende einen Verweis auf den vollständigen Artikel: [[vollstaendig-{slug}|Vollständiger Inhalt]]
+
+## FORMAT (genau einhalten – jede Abweichung macht den Artikel unbrauchbar)
+
+=== ARTIKEL 1: VOLLSTAENDIG ===
 SUMMARY: {Ein Satz, 15-40 Wörter}
+# {Titel des vollständigen Artikels}
 {Inhalt als Markdown}
 
-REGELN:
-1. Erste Zeile: SUMMARY: ...
-2. Danach vollständiger Wiki-Artikel mit ##-Überschriften
-3. Verlinke zu existierenden Seiten mit [[slug|Titel]]
-4. Maximal 4000 Wörter
-5. Sprache: Deutsch
-6. Am Ende: ## Zusammenfassung mit Bullet-Points
+=== ARTIKEL 2: ZUSAMMENFASSUNG ===
+SUMMARY: {Ein Satz, 15-40 Wörter}
+# {Titel der Zusammenfassung}
+{Inhalt als Markdown}
+
+## REGELN FÜR BEIDE ARTIKEL
+- Sprache: Deutsch
+- Verlinke zu existierenden Seiten mit [[slug|Titel]]
+- Maximal 6000 Tokens pro Artikel
+- KEINE einleitenden Erklärungen oder Meta-Kommentare – nur die beiden Artikel im angegebenen Format
 
 VORHANDENE SEITEN (für Verlinkungen):
 ${pagesContext || "Keine vorhanden."}
 
-QUELLDOKUMENT:
-${doc.content.slice(0, 15000)}`;
+## QUELLDOKUMENT
+YouTube-Metadaten + vollständiges Transkript:
+${doc.content}`;
 
   try {
     console.log(
@@ -510,7 +544,7 @@ ${doc.content.slice(0, 15000)}`;
       body: JSON.stringify({
         model: provider.default_model,
         messages: [{ role: "user", content: systemPrompt }],
-        max_tokens: 4096,
+        max_tokens: 8192,
       }),
       signal: AbortSignal.timeout(60000),
     });
@@ -537,32 +571,102 @@ ${doc.content.slice(0, 15000)}`;
       return null;
     }
 
-    // SUMMARY parsen
-    const summaryMatch = fullText.match(/^SUMMARY:\s*(.+)/m);
-    const summary = summaryMatch ? summaryMatch[1].trim() : "";
-    const content = fullText.replace(/^SUMMARY:\s*.+(\r?\n|$)/, "").trim();
+    // Zwei Artikel parsen (getrennt durch === ARTIKEL 2)
+    const parts = fullText.split(/=== ARTIKEL 2:?/i);
+    const rawArticle1 = parts[0] || "";
+    const rawArticle2 = parts[1] || "";
 
-    // Slug aus Titel generieren
-    const titleMatch = content.match(/^#\s+(.+)/m);
-    const title = titleMatch ? titleMatch[1].trim() : doc.title;
-    const slug =
-      "wiki/" +
-      title
-        .toLowerCase()
-        .replace(/[^a-z0-9äöüß\s-]/g, "")
-        .replace(/\s+/g, "-")
-        .replace(/-+/g, "-")
-        .slice(0, 80);
+    function parseArticle(
+      raw: string,
+      fallbackTitle: string,
+      index: number,
+    ): { summary: string; title: string; content: string } | null {
+      const summaryMatch = raw.match(/^SUMMARY:\s*(.+)/im);
+      const summary = summaryMatch ? summaryMatch[1].trim() : "";
 
-    console.log(
-      `[wiki] ✅ Wiki generiert: title="${title}", slug="${slug}", ${content.length} Zeichen`,
-    );
-    console.log(`[wiki] Summary: ${summary.slice(0, 100)}`);
-    console.log(
-      `[wiki] ========== generateWikiPage ENDE (${Date.now() - t0}ms) ==========`,
-    );
+      // SUMMARY-Zeile aus Content entfernen
+      let content = raw.replace(/^SUMMARY:\s*.+(\r?\n|$)/i, "").trim();
 
-    return { slug, title, summary, content };
+      // "=== ARTIKEL 1:"-Marker entfernen falls vorhanden
+      content = content.replace(/^=== ARTIKEL \d:?\s*(VOLLSTAENDIG|ZUSAMMENFASSUNG)?\s*===?/i, "").trim();
+
+      if (!content) {
+        console.warn(`[wiki] Artikel ${index}: kein Inhalt gefunden`);
+        return null;
+      }
+
+      const titleMatch = content.match(/^#\s+(.+)/m);
+      const title = titleMatch ? titleMatch[1].trim() : `${fallbackTitle} (Teil ${index})`;
+
+      return { summary, title, content };
+    }
+
+    const article1 = parseArticle(rawArticle1, doc.title, 1);
+    const article2 = parseArticle(rawArticle2, doc.title, 2);
+
+    const results: Array<{
+      slug: string;
+      title: string;
+      summary: string;
+      content: string;
+      page_type: string;
+    }> = [];
+
+    if (article1) {
+      const slug =
+        "vollstaendig-" +
+        article1.title
+          .toLowerCase()
+          .replace(/[^a-z0-9äöüß\s-]/g, "")
+          .replace(/\s+/g, "-")
+          .replace(/-+/g, "-")
+          .slice(0, 80);
+
+      // Cross-Link zwischen den Artikeln einfügen
+      let content = article1.content;
+      if (article2?.title) {
+        const summarySlug =
+          "zusammenfassung-" +
+          article2.title
+            .toLowerCase()
+            .replace(/[^a-z0-9äöüß\s-]/g, "")
+            .replace(/\s+/g, "-")
+            .replace(/-+/g, "-")
+            .slice(0, 80);
+        if (!content.includes(`[[${summarySlug}]]`)) {
+          content += `\n\n---\n📄 **Zusammenfassung**: [[${summarySlug}|Zusammenfassung dieses Artikels]]`;
+        }
+      }
+
+      console.log(`[wiki] ✅ Artikel 1 (vollstaendig): "${article1.title}" (${content.length} Zeichen)`);
+      results.push({ slug, title: article1.title, summary: article1.summary, content, page_type: "vollstaendig" });
+    }
+
+    if (article2) {
+      const slug =
+        "zusammenfassung-" +
+        article2.title
+          .toLowerCase()
+          .replace(/[^a-z0-9äöüß\s-]/g, "")
+          .replace(/\s+/g, "-")
+          .replace(/-+/g, "-")
+          .slice(0, 80);
+
+      // Cross-Link zum vollständigen Artikel
+      let content = article2.content;
+      if (results.length > 0) {
+        const fullSlug = results[0].slug;
+        if (!content.includes(`[[${fullSlug}]]`)) {
+          content = `📄 **Vollständiger Artikel**: [[${fullSlug}|Vollständiger Inhalt]]\n\n${content}`;
+        }
+      }
+
+      console.log(`[wiki] ✅ Artikel 2 (zusammenfassung): "${article2.title}" (${content.length} Zeichen)`);
+      results.push({ slug, title: article2.title, summary: article2.summary, content, page_type: "zusammenfassung" });
+    }
+
+    console.log(`[wiki] ========== generateWikiPage ENDE (${Date.now() - t0}ms, ${results.length} Artikel) ==========`);
+    return results.length > 0 ? results : null;
   } catch (e: any) {
     console.error(`[wiki] ❌ Generation error:`, e.message);
     console.log(

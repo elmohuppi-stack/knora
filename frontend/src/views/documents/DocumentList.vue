@@ -174,12 +174,25 @@
           <pre>{{ selectedDoc.content }}</pre>
         </div>
         <p v-else class="empty">(Kein Inhalt)</p>
-        <div class="dialog-actions" style="justify-content:space-between;">
-          <button class="btn-secondary" @click="generateWikiForDoc(selectedDoc.id)" :disabled="generatingWiki">
-            {{ generatingWiki ? "⏳ Generiere..." : "📖 Wiki-Artikel generieren" }}
+        <div class="dialog-actions" style="justify-content: space-between">
+          <button
+            class="btn-secondary"
+            @click="generateWikiForDoc(selectedDoc.id)"
+            :disabled="generatingWiki"
+          >
+            {{
+              generatingWiki ? "⏳ Generiere..." : "📖 Wiki-Artikel generieren"
+            }}
           </button>
-          <span v-if="wikiGenResult" class="success" style="margin-right:auto;margin-left:0.5rem;">{{ wikiGenResult }}</span>
-          <button class="btn-secondary" @click="showDetail = false">Schließen</button>
+          <span
+            v-if="wikiGenResult"
+            class="success"
+            style="margin-right: auto; margin-left: 0.5rem"
+            >{{ wikiGenResult }}</span
+          >
+          <button class="btn-secondary" @click="showDetail = false">
+            Schließen
+          </button>
         </div>
       </div>
     </div>
@@ -343,9 +356,15 @@ async function generateWikiForDoc(docId: string) {
   generatingWiki.value = true;
   wikiGenResult.value = "";
   try {
-    const res = await axios.post(`/api/v1/wiki/${workspaceId.value}/generate/${docId}`);
-    const page = res.data.page;
-    wikiGenResult.value = `✅ „${page.title}” erstellt`;
+    const res = await axios.post(
+      `/api/v1/wiki/${workspaceId.value}/generate/${docId}`,
+    );
+    const pages = res.data.pages || [];
+    if (pages.length > 0) {
+      wikiGenResult.value = `✅ ${pages.length} Artikel erstellt: „${pages[0].title}”`;
+    } else {
+      wikiGenResult.value = "⚠️ Keine Artikel generiert";
+    }
   } catch (e: any) {
     wikiGenResult.value = "❌ " + (e.response?.data?.error || e.message);
   } finally {

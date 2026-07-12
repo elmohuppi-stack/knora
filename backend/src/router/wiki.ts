@@ -139,7 +139,7 @@ wikiRouter.post("/:workspaceId/generate/:documentId", async (c) => {
     documentId,
     existingSlugs,
   );
-  if (!result) {
+  if (!result || result.length === 0) {
     return c.json(
       {
         error:
@@ -149,35 +149,39 @@ wikiRouter.post("/:workspaceId/generate/:documentId", async (c) => {
     );
   }
 
-  // Prüfen ob Slug schon existiert -> ggf. anpassen
-  let slug = result.slug;
-  let counter = 1;
-  while (existingSlugs.includes(slug)) {
-    slug = `${result.slug}-${counter}`;
-    counter++;
+  // Alle generierten Artikel anlegen
+  const pages: any[] = [];
+  const allSlugs = [...existingSlugs];
+
+  for (const article of result) {
+    let slug = article.slug;
+    let counter = 1;
+    while (allSlugs.includes(slug)) {
+      slug = `${article.slug}-${counter}`;
+      counter++;
+    }
+    allSlugs.push(slug);
+
+    const page = await wikiService.createPage({
+      workspace_id: workspaceId,
+      slug,
+      title: article.title,
+      content: article.content,
+      summary: article.summary,
+      page_type: article.page_type,
+      source_document_id: documentId,
+    });
+    pages.push(page);
+
+    // Links auflösen
+    const { out_links } = await wikiService.resolveLinks(workspaceId, article.content);
+    if (out_links.length > 0) {
+      await wikiService.updatePage(workspaceId, slug, { out_links });
+      await wikiService.updateIncomingLinks(workspaceId, slug, out_links);
+    }
   }
 
-  const page = await wikiService.createPage({
-    workspace_id: workspaceId,
-    slug,
-    title: result.title,
-    content: result.content,
-    summary: result.summary,
-    page_type: "article",
-    source_document_id: documentId,
-  });
-
-  // Links auflösen
-  const { out_links } = await wikiService.resolveLinks(
-    workspaceId,
-    result.content,
-  );
-  if (out_links.length > 0) {
-    await wikiService.updatePage(workspaceId, slug, { out_links });
-    await wikiService.updateIncomingLinks(workspaceId, slug, out_links);
-  }
-
-  return c.json({ page }, 201);
+  return c.json({ pages }, 201);
 });
 
 // Wiki-Statistiken
