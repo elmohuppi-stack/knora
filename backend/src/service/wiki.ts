@@ -570,34 +570,40 @@ ${doc.content}`;
     const data = await response.json();
     const fullText = data?.choices?.[0]?.message?.content || "";
     console.log(`[wiki] LLM-Antwort: ${fullText.length} Zeichen`);
+    // Ersten 500 Zeichen für Debugging loggen
+    console.log(`[wiki] LLM-Antwort-Preview: ${fullText.slice(0, 500).replace(/\n/g, "\\n")}`);
 
     if (!fullText) {
       console.warn(`[wiki] ❌ Leere LLM-Antwort`);
       return null;
     }
 
-    // Zwei Artikel parsen (getrennt durch === ARTIKEL 2)
-    const parts = fullText.split(/=== ARTIKEL 2:?/i);
+    // Zwei Artikel parsen (getrennt durch === ARTIKEL 2 oder === ZUSAMMENFASSUNG)
+    // Akzeptiere verschiedene Schreibweisen:
+    // === ARTIKEL 2 ===, === ARTIKEL 2: ZUSAMMENFASSUNG ===, === ZUSAMMENFASSUNG ===
+    const articleSplitter = /===?\s*(?:ARTIKEL\s*2|ZUSAMMENFASSUNG)\s*:?\s*(?:ZUSAMMENFASSUNG)?\s*===?/i;
+    const parts = fullText.split(articleSplitter);
     const rawArticle1 = parts[0] || "";
     const rawArticle2 = parts[1] || "";
+
+    console.log(`[wiki] Artikel 1 Rohdaten: ${rawArticle1.length} Zeichen`);
+    console.log(`[wiki] Artikel 2 Rohdaten: ${rawArticle2.length} Zeichen`);
 
     function parseArticle(
       raw: string,
       fallbackTitle: string,
       index: number,
     ): { summary: string; title: string; content: string } | null {
-      const summaryMatch = raw.match(/^SUMMARY:\s*(.+)/im);
+      const summaryMatch = raw.match(/SUMMARY:\s*(.+)/im);
       const summary = summaryMatch ? summaryMatch[1].trim() : "";
 
       // SUMMARY-Zeile aus Content entfernen
-      let content = raw.replace(/^SUMMARY:\s*.+(\r?\n|$)/i, "").trim();
+      let content = raw.replace(/SUMMARY:\s*.+(\r?\n|$)/i, "").trim();
 
-      // "=== ARTIKEL 1:"-Marker entfernen falls vorhanden
+      // Marker entfernen (=== ARTIKEL 1: VOLLSTAENDIG ===, etc.)
       content = content
-        .replace(
-          /^=== ARTIKEL \d:?\s*(VOLLSTAENDIG|ZUSAMMENFASSUNG)?\s*===?/i,
-          "",
-        )
+        .replace(/===?\s*ARTIKEL\s*\d\s*:?\s*(VOLLSTAENDIG|ZUSAMMENFASSUNG)?\s*===?/gi, "")
+        .replace(/===?\s*(VOLLSTAENDIG|ZUSAMMENFASSUNG)\s*===?/gi, "")
         .trim();
 
       if (!content) {
@@ -610,11 +616,9 @@ ${doc.content}`;
         ? titleMatch[1].trim()
         : `${fallbackTitle} (Teil ${index})`;
 
+      console.log(`[wiki] Artikel ${index} geparst: "${title}" (${content.length} Zeichen, summary=${summary.slice(0, 60)})`);
       return { summary, title, content };
     }
-
-    const article1 = parseArticle(rawArticle1, doc.title, 1);
-    const article2 = parseArticle(rawArticle2, doc.title, 2);
 
     const results: Array<{
       slug: string;

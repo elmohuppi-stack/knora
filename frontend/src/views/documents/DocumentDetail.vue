@@ -2,14 +2,22 @@
   <main class="main-content">
     <div class="header">
       <div class="header-left">
-        <router-link :to="'/documents/' + workspaceId" class="back-link">← Zurück zur Liste</router-link>
+        <router-link :to="'/documents/' + workspaceId" class="back-link"
+          >← Zurück zur Liste</router-link
+        >
         <h3>{{ doc?.title || "Lädt..." }}</h3>
       </div>
       <div class="header-actions" v-if="doc">
-        <button class="btn-primary" @click="generateWiki" :disabled="generating">
+        <button
+          class="btn-primary"
+          @click="generateWiki"
+          :disabled="generating"
+        >
           {{ generating ? "⏳ Generiere..." : "📖 Wiki-Artikel generieren" }}
         </button>
-        <span v-if="genResult" class="success" style="margin-left:0.5rem;">{{ genResult }}</span>
+        <span v-if="genResult" class="success" style="margin-left: 0.5rem">{{
+          genResult
+        }}</span>
       </div>
     </div>
 
@@ -24,7 +32,14 @@
           :src="`https://www.youtube-nocookie.com/embed/${youtubeId}`"
           title="YouTube Video"
           frameborder="0"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allow="
+            accelerometer;
+            autoplay;
+            clipboard-write;
+            encrypted-media;
+            gyroscope;
+            picture-in-picture;
+          "
           allowfullscreen
           class="video-iframe"
         ></iframe>
@@ -43,11 +58,15 @@
           </div>
           <div class="meta-card">
             <strong>Status</strong>
-            <span :class="['status', doc.parse_status]">{{ statusLabel(doc.parse_status) }}</span>
+            <span :class="['status', doc.parse_status]">{{
+              statusLabel(doc.parse_status)
+            }}</span>
           </div>
           <div class="meta-card" v-if="doc.source_url">
             <strong>Quelle</strong>
-            <a :href="doc.source_url" target="_blank" rel="noopener">{{ doc.source_url.slice(0, 60) }}…</a>
+            <a :href="doc.source_url" target="_blank" rel="noopener"
+              >{{ doc.source_url.slice(0, 60) }}…</a
+            >
           </div>
           <div class="meta-card">
             <strong>Chunks</strong>
@@ -60,7 +79,7 @@
         </div>
 
         <!-- Wiki-Artikel Verweis -->
-        <div v-if="wikiPages.length > 0" style="margin:1rem 0;">
+        <div v-if="wikiPages.length > 0" style="margin: 1rem 0">
           <h4>📖 Wiki-Artikel</h4>
           <div class="wiki-links">
             <router-link
@@ -70,13 +89,17 @@
               class="wiki-link-chip"
             >
               {{ wp.title }}
-              <span class="wiki-type-badge">{{ wp.page_type === "vollstaendig" ? "Vollständig" : "Zusammenfassung" }}</span>
+              <span class="wiki-type-badge">{{
+                wp.page_type === "vollstaendig"
+                  ? "Vollständig"
+                  : "Zusammenfassung"
+              }}</span>
             </router-link>
           </div>
         </div>
 
         <!-- Transkript / Inhalt -->
-        <h4 style="margin-top:1.5rem;">📝 Transkript</h4>
+        <h4 style="margin-top: 1.5rem">📝 Transkript</h4>
         <div class="transcript-box" v-if="doc.content">
           <pre>{{ doc.content }}</pre>
         </div>
@@ -143,7 +166,9 @@ async function generateWiki() {
   generating.value = true;
   genResult.value = "";
   try {
-    const res = await axios.post(`/api/v1/wiki/${workspaceId}/generate/${documentId}`);
+    const res = await axios.post(
+      `/api/v1/wiki/${workspaceId}/generate/${documentId}`,
+    );
     const pages = res.data.pages || [];
     if (pages.length > 0) {
       genResult.value = `✅ ${pages.length} Artikel erstellt`;

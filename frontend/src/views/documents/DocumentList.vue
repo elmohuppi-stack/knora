@@ -147,8 +147,16 @@
             </td>
             <td class="date">{{ formatDate(doc.created_at) }}</td>
             <td>
-              <button class="btn-icon-sm" @click="generateWithConfirm(doc.id)" title="Wiki-Artikel generieren">📖</button>
-              <button class="btn-danger-sm" @click="deleteDoc(doc.id)">✕</button>
+              <button
+                class="btn-icon-sm"
+                @click="generateWithConfirm(doc.id)"
+                title="Wiki-Artikel generieren"
+              >
+                📖
+              </button>
+              <button class="btn-danger-sm" @click="deleteDoc(doc.id)">
+                ✕
+              </button>
             </td>
           </tr>
         </tbody>
@@ -371,12 +379,14 @@ async function generateWikiForDoc(docId: string, silent = false) {
     );
     const pages = res.data.pages || [];
     if (pages.length > 0) {
-      if (!silent) wikiGenResult.value = `✅ ${pages.length} Artikel erstellt: „${pages[0].title}”`;
+      if (!silent)
+        wikiGenResult.value = `✅ ${pages.length} Artikel erstellt: „${pages[0].title}”`;
     } else {
       if (!silent) wikiGenResult.value = "⚠️ Keine Artikel generiert";
     }
   } catch (e: any) {
-    if (!silent) wikiGenResult.value = "❌ " + (e.response?.data?.error || e.message);
+    if (!silent)
+      wikiGenResult.value = "❌ " + (e.response?.data?.error || e.message);
   } finally {
     if (!silent) generatingWiki.value = false;
   }

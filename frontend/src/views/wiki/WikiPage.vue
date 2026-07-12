@@ -94,6 +94,7 @@
 import { ref, computed, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
+import { useWorkspace } from "../../composables/useWorkspace";
 import { useConfirm } from "../../composables/useConfirm";
 import ConfirmModal from "../../components/ConfirmModal.vue";
 import axios from "axios";
@@ -103,6 +104,7 @@ import DOMPurify from "dompurify";
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
+const { resolveWorkspace, isUUID } = useWorkspace();
 const {
   show: showConfirm,
   options: confirmOptions,
@@ -110,7 +112,9 @@ const {
   onConfirm,
   onCancel,
 } = useConfirm();
-const workspaceId = route.params.workspaceId as string;
+const rawWorkspaceId = route.params.workspaceId as string;
+const workspaceId = ref(rawWorkspaceId);
+const workspaceSlug = ref("");
 const pageSlug = route.params.slug as string;
 
 const page = ref<any>(null);
@@ -127,7 +131,7 @@ const renderedContent = computed(() => {
     /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
     (_: string, slug: string, text?: string) => {
       const label = text || slug.split("/").pop() || slug;
-      return `<a href="/wiki/${workspaceId}/${encodeURIComponent(slug)}" class="wiki-link">${label}</a>`;
+      return `<a href="/wiki/${workspaceId.value}/${encodeURIComponent(slug)}" class="wiki-link">${label}</a>`;
     },
   );
   const parsed = marked.parse(html, { async: false }) as string;
@@ -139,6 +143,19 @@ onMounted(async () => {
     router.push("/login");
     return;
   }
+
+  // Slug auflösen falls nötig
+  if (rawWorkspaceId && !isUUID(rawWorkspaceId)) {
+    const resolved = await resolveWorkspace(rawWorkspaceId);
+    if (resolved) {
+      workspaceId.value = resolved.id;
+      workspaceSlug.value = resolved.slug;
+    }
+  }
+
+  // Slug für API verwenden (ggf. mit fallback auf rawWorkspaceId)
+  const slug = workspaceSlug.value || rawWorkspaceId;
+
   await loadPage();
 });
 
@@ -146,7 +163,7 @@ async function loadPage() {
   loading.value = true;
   try {
     const res = await axios.get(
-      `/api/v1/wiki/${workspaceId}/pages/${encodeURIComponent(pageSlug)}`,
+      `/api/v1/wiki/${workspaceId.value}/pages/${encodeURIComponent(pageSlug)}`,
     );
     page.value = res.data.page;
     editTitle.value = page.value.title;
@@ -162,7 +179,7 @@ async function loadPage() {
 async function savePage() {
   try {
     const res = await axios.put(
-      `/api/v1/wiki/${workspaceId}/pages/${encodeURIComponent(pageSlug)}`,
+      `/api/v1/wiki/${workspaceId.value}/pages/${encodeURIComponent(pageSlug)}`,
       {
         title: editTitle.value,
         summary: editSummary.value,
@@ -185,9 +202,9 @@ async function deletePage() {
   if (!ok) return;
   try {
     await axios.delete(
-      `/api/v1/wiki/${workspaceId}/pages/${encodeURIComponent(pageSlug)}`,
+      `/api/v1/wiki/${workspaceId.value}/pages/${encodeURIComponent(pageSlug)}`,
     );
-    router.push(`/wiki/${workspaceId}`);
+    router.push(`/wiki/${workspaceSlug.value || workspaceId.value}`);
   } catch {
     alert("Fehler beim Löschen");
   }
