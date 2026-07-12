@@ -39,9 +39,6 @@
 
     <!-- Main Content -->
     <div class="app-main">
-      <header class="app-header">
-        <h1 class="app-title">Knora</h1>
-      </header>
       <main class="app-content">
         <router-view />
       </main>
@@ -286,26 +283,8 @@ body {
   min-width: 0;
 }
 
-.app-header {
-  height: var(--header-height);
-  background: var(--color-header-bg);
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 1.5rem;
-  flex-shrink: 0;
-}
-
-.app-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
 .app-content {
   flex: 1;
-  padding: 1.5rem;
   overflow-y: auto;
 }
 

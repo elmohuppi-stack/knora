@@ -1,6 +1,6 @@
 import { db } from "../db/index.ts";
 import { wikiPages, documents, modelProviders } from "../db/schema.ts";
-import { eq, and, like, or, desc, sql } from "drizzle-orm";
+import { eq, and, like, or, desc, sql, inArray } from "drizzle-orm";
 
 // --- CRUD ---
 
@@ -476,7 +476,7 @@ export async function generateWikiPage(
           .where(
             and(
               eq(wikiPages.workspace_id, workspaceId),
-              sql`${wikiPages.slug} = ANY(${existingSlugs}::text[])`,
+              inArray(wikiPages.slug, existingSlugs),
             ),
           )
       : [];
