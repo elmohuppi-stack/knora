@@ -192,7 +192,7 @@ body {
 }
 .app-sidebar.collapsed .sidebar-header {
   justify-content: flex-start;
-  padding: 1.25rem 0.5rem;
+  padding: 1.25rem 0;
   gap: 0;
 }
 
@@ -209,7 +209,8 @@ body {
   gap: 0.35rem;
 }
 .app-sidebar.collapsed .sidebar-logo {
-  font-size: 1.5rem;
+  font-size: 1.2rem;
+  padding-left: 0.35rem;
 }
 .app-sidebar.collapsed .logo-text {
   display: none;
@@ -235,8 +236,9 @@ body {
 .app-sidebar.collapsed .sidebar-toggle {
   display: flex;
   margin-left: auto;
-  font-size: 0.85rem;
-  padding: 0.25rem 0.4rem;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.2rem;
+  border: none;
 }
 
 .sidebar-nav {
