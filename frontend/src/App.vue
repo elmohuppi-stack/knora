@@ -4,9 +4,15 @@
     <!-- Sidebar -->
     <aside class="app-sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-header">
-        <router-link to="/" class="sidebar-logo">🧠 Knora</router-link>
-        <button class="sidebar-toggle" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? 'Menü einblenden' : 'Menü ausblenden'">
-          <i :class="sidebarCollapsed ? 'pi pi-angle-right' : 'pi pi-angle-left'"></i>
+        <router-link to="/" class="sidebar-logo">🧠 <span class="logo-text">Knora</span></router-link>
+        <button
+          class="sidebar-toggle"
+          @click="sidebarCollapsed = !sidebarCollapsed"
+          :title="sidebarCollapsed ? 'Menü einblenden' : 'Menü ausblenden'"
+        >
+          <i
+            :class="sidebarCollapsed ? 'pi pi-angle-right' : 'pi pi-angle-left'"
+          ></i>
         </button>
       </div>
       <nav class="sidebar-nav">
@@ -185,8 +191,9 @@ body {
   gap: 0.5rem;
 }
 .app-sidebar.collapsed .sidebar-header {
-  justify-content: center;
-  padding: 1.25rem 0;
+  justify-content: flex-start;
+  padding: 1.25rem 0.5rem;
+  gap: 0;
 }
 
 .sidebar-logo {
@@ -197,9 +204,15 @@ body {
   letter-spacing: -0.5px;
   white-space: nowrap;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 .app-sidebar.collapsed .sidebar-logo {
   font-size: 1.5rem;
+}
+.app-sidebar.collapsed .logo-text {
+  display: none;
 }
 
 .sidebar-toggle {
@@ -220,7 +233,10 @@ body {
   background: rgba(255, 255, 255, 0.1);
 }
 .app-sidebar.collapsed .sidebar-toggle {
-  display: none;
+  display: flex;
+  margin-left: auto;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.4rem;
 }
 
 .sidebar-nav {
