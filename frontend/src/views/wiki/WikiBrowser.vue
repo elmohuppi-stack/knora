@@ -10,12 +10,8 @@
       </div>
       <div class="header-actions">
         <div class="tab-bar">
-          <router-link :to="'/documents/' + workspaceId" class="tab"
-            >📄 Dokumente</router-link
-          >
-          <router-link :to="'/wiki/' + workspaceId" class="tab active"
-            >📖 Wiki</router-link
-          >
+          <router-link :to="'/documents/' + (workspaceSlug || workspaceId)" class="tab">📄 Dokumente</router-link>
+          <router-link :to="'/wiki/' + (workspaceSlug || workspaceId)" class="tab active">📖 Wiki</router-link>
         </div>
         <button
           class="btn-icon"
@@ -70,7 +66,7 @@
             :key="p.id"
             class="page-card"
             @click="
-              $router.push(`/wiki/${workspaceId}/${encodeURIComponent(p.slug)}`)
+              $router.push(`/wiki/${workspaceSlug || workspaceId}/${encodeURIComponent(p.slug)}`)
             "
           >
             <div class="page-type-badge">{{ typeIcon(p.page_type) }}</div>
@@ -306,14 +302,18 @@
 import { ref, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
+import { useWorkspace } from "../../composables/useWorkspace";
 import axios from "axios";
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
+const { resolveWorkspace, isUUID } = useWorkspace();
 const ws = ref<any>(null);
 const workspaces = ref<any[]>([]);
-const workspaceId = ref((route.params.workspaceId as string) || "");
+const rawWorkspaceId = (route.params.workspaceId as string) || "";
+const workspaceId = ref(rawWorkspaceId);
+const workspaceSlug = ref("");
 const pages = ref<any[]>([]);
 const totalPages = ref(0);
 const loading = ref(false);
@@ -345,6 +345,16 @@ onMounted(async () => {
     return;
   }
   await loadWorkspaces();
+
+  // Slug auflösen falls nötig
+  if (rawWorkspaceId && !isUUID(rawWorkspaceId)) {
+    const resolved = await resolveWorkspace(rawWorkspaceId);
+    if (resolved) {
+      workspaceId.value = resolved.id;
+      workspaceSlug.value = resolved.slug;
+    }
+  }
+
   if (workspaceId.value) {
     await loadWorkspace();
     await loadPages();
@@ -396,7 +406,8 @@ async function loadWorkspaces() {
 
 function onWorkspaceSelect() {
   if (workspaceId.value) {
-    router.push("/wiki/" + workspaceId.value);
+    const ws = workspaces.value.find((w: any) => w.id === workspaceId.value);
+    router.push('/wiki/' + (ws?.slug || workspaceId.value));
   }
 }
 

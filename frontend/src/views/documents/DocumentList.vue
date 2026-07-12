@@ -10,12 +10,8 @@
       </div>
       <div class="header-actions">
         <div class="tab-bar">
-          <router-link :to="'/documents/' + workspaceId" class="tab active"
-            >📄 Dokumente</router-link
-          >
-          <router-link :to="'/wiki/' + workspaceId" class="tab"
-            >📖 Wiki</router-link
-          >
+          <router-link :to="'/documents/' + (workspaceSlug || workspaceId)" class="tab active">📄 Dokumente</router-link>
+          <router-link :to="'/wiki/' + (workspaceSlug || workspaceId)" class="tab">📖 Wiki</router-link>
         </div>
         <button
           class="btn-icon"
@@ -34,7 +30,9 @@
       </div>
     </div>
     <div class="header-sub">
-      <router-link to="/settings" class="log-link">📋 Aktivitätslog</router-link>
+      <router-link to="/settings" class="log-link"
+        >📋 Aktivitätslog</router-link
+      >
     </div>
 
     <!-- Upload Area -->
@@ -123,7 +121,13 @@
         </thead>
         <tbody>
           <tr v-for="doc in docs" :key="doc.id">
-            <td class="doc-title" @click="showDocDetail(doc)" style="cursor:pointer;">{{ doc.title }}</td>
+            <td
+              class="doc-title"
+              @click="showDocDetail(doc)"
+              style="cursor: pointer"
+            >
+              {{ doc.title }}
+            </td>
             <td>
               <span class="type-badge">{{ doc.type }}</span>
             </td>
@@ -163,7 +167,9 @@
         </div>
         <p v-else class="empty">(Kein Inhalt)</p>
         <div class="dialog-actions">
-          <button class="btn-secondary" @click="showDetail = false">Schließen</button>
+          <button class="btn-secondary" @click="showDetail = false">
+            Schließen
+          </button>
         </div>
       </div>
     </div>
@@ -262,12 +268,17 @@
 import { ref, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
+import { useWorkspace } from "../../composables/useWorkspace";
 import axios from "axios";
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const workspaceId = route.params.workspaceId as string;
+const { resolveWorkspace, isUUID, resolving } = useWorkspace();
+
+const rawWorkspaceId = route.params.workspaceId as string;
+const workspaceId = ref(rawWorkspaceId);
+const workspaceSlug = ref("");
 
 const docs = ref<any[]>([]);
 const ws = ref<any>(null);
@@ -305,19 +316,32 @@ onMounted(async () => {
     router.push("/login");
     return;
   }
-  if (!workspaceId) {
+  if (!rawWorkspaceId) {
     router.push("/workspaces");
     return;
   }
+
+  // Slug auflösen falls nötig
+  if (!isUUID(rawWorkspaceId)) {
+    const resolved = await resolveWorkspace(rawWorkspaceId);
+    if (!resolved) {
+      router.push("/workspaces");
+      return;
+    }
+    workspaceId.value = resolved.id;
+    workspaceSlug.value = resolved.slug;
+  }
+
   await Promise.all([loadDocs(), loadWorkspace()]);
 });
 
 async function loadWorkspace() {
   try {
-    const res = await axios.get(`/api/v1/workspaces/${workspaceId}`);
+    const res = await axios.get(`/api/v1/workspaces/${workspaceId.value}`);
     ws.value = res.data.workspace;
     editName.value = ws.value.name;
     editDesc.value = ws.value.description || "";
+    workspaceSlug.value = ws.value.slug;
   } catch (e: any) {
     console.error("Failed to load workspace", e);
   }
@@ -326,7 +350,7 @@ async function loadWorkspace() {
 async function updateWs() {
   settingsError.value = "";
   try {
-    const res = await axios.put(`/api/v1/workspaces/${workspaceId}`, {
+    const res = await axios.put(`/api/v1/workspaces/${workspaceId.value}`, {
       name: editName.value,
       description: editDesc.value || undefined,
     });
@@ -340,7 +364,7 @@ async function updateWs() {
 async function deleteWs() {
   if (!confirm(`Workspace "${ws.value?.name}" wirklich löschen?`)) return;
   try {
-    await axios.delete(`/api/v1/workspaces/${workspaceId}`);
+    await axios.delete(`/api/v1/workspaces/${workspaceId.value}`);
     router.push("/workspaces");
   } catch (e: any) {
     settingsError.value =
@@ -350,7 +374,7 @@ async function deleteWs() {
 
 async function loadDocs() {
   try {
-    const res = await axios.get(`/api/v1/documents/${workspaceId}`);
+    const res = await axios.get(`/api/v1/documents/${workspaceId.value}`);
     docs.value = res.data.documents || [];
   } catch (e: any) {
     console.error("Failed to load docs", e);
@@ -369,7 +393,7 @@ async function uploadFile(e: Event) {
   try {
     const form = new FormData();
     form.append("file", file);
-    await axios.post(`/api/v1/documents/upload/${workspaceId}`, form, {
+    await axios.post(`/api/v1/documents/upload/${workspaceId.value}`, form, {
       headers: { "Content-Type": "multipart/form-data" },
     });
     showUpload.value = false;
@@ -386,7 +410,7 @@ async function importUrl() {
   urlError.value = "";
   try {
     await axios.post("/api/v1/documents/import-url", {
-      workspace_id: workspaceId,
+      workspace_id: workspaceId.value,
       url: urlInput.value,
     });
     showUrl.value = false;
@@ -405,7 +429,7 @@ async function importYoutube() {
   youtubeInfo.value = "";
   try {
     const res = await axios.post("/api/v1/documents/import-youtube", {
-      workspace_id: workspaceId,
+      workspace_id: workspaceId.value,
       url: youtubeUrl.value,
     });
     youtubeInfo.value = `✅ ${res.data.document.title}`;
