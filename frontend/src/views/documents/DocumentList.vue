@@ -131,7 +131,7 @@
           <tr v-for="doc in docs" :key="doc.id">
             <td
               class="doc-title"
-              @click="showDocDetail(doc)"
+              @click="$router.push(`/documents/${workspaceId}/${doc.id}`)"
               style="cursor: pointer"
             >
               {{ doc.title }}

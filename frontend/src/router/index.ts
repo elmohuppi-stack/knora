@@ -49,6 +49,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: "/documents/:workspaceId/:documentId",
+      name: "DocumentDetail",
+      component: () => import("../views/documents/DocumentDetail.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
       path: "/admin",
       redirect: "/settings",
     },
