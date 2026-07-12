@@ -117,7 +117,12 @@
         </div>
       </div>
     </div>
-    <ConfirmModal :show="showConfirm" :options="confirmOptions" :on-confirm="onConfirm" :on-cancel="onCancel" />
+    <ConfirmModal
+      :show="showConfirm"
+      :options="confirmOptions"
+      :on-confirm="onConfirm"
+      :on-cancel="onCancel"
+    />
   </main>
 </template>
 
@@ -131,7 +136,13 @@ import axios from "axios";
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const { show: showConfirm, options: confirmOptions, ask: askConfirm, onConfirm, onCancel } = useConfirm();
+const {
+  show: showConfirm,
+  options: confirmOptions,
+  ask: askConfirm,
+  onConfirm,
+  onCancel,
+} = useConfirm();
 const ws = ref<any>(null);
 const showEdit = ref(false);
 const editName = ref("");

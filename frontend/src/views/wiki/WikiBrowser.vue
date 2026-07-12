@@ -304,6 +304,7 @@
         </div>
         <p v-if="settingsError" class="error">{{ settingsError }}</p>
       </div>
+    </div>
     <ConfirmModal :show="showConfirm" :options="confirmOptions" :on-confirm="onConfirm" :on-cancel="onCancel" />
   </main>
 </template>

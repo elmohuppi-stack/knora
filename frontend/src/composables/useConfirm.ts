@@ -15,7 +15,12 @@ export function useConfirm() {
   let resolveCallback: ((value: boolean) => void) | null = null;
 
   function ask(opts: ConfirmOptions): Promise<boolean> {
-    options.value = { confirmText: "Löschen", cancelText: "Abbrechen", danger: true, ...opts };
+    options.value = {
+      confirmText: "Löschen",
+      cancelText: "Abbrechen",
+      danger: true,
+      ...opts,
+    };
     show.value = true;
     return new Promise((resolve) => {
       resolveCallback = resolve;

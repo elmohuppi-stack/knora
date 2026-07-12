@@ -291,7 +291,13 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 const { resolveWorkspace, isUUID, resolving } = useWorkspace();
-const { show: showConfirm, options: confirmOptions, ask: askConfirm, onConfirm, onCancel } = useConfirm();
+const {
+  show: showConfirm,
+  options: confirmOptions,
+  ask: askConfirm,
+  onConfirm,
+  onCancel,
+} = useConfirm();
 
 const rawWorkspaceId = route.params.workspaceId as string;
 const workspaceId = ref(rawWorkspaceId);
