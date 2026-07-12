@@ -2,9 +2,12 @@
   <!-- Nur Layout anzeigen wenn eingeloggt -->
   <div class="app-layout" v-if="auth.isAuthenticated">
     <!-- Sidebar -->
-    <aside class="app-sidebar">
+    <aside class="app-sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-header">
         <router-link to="/" class="sidebar-logo">🧠 Knora</router-link>
+        <button class="sidebar-toggle" @click="sidebarCollapsed = !sidebarCollapsed" :title="sidebarCollapsed ? 'Menü einblenden' : 'Menü ausblenden'">
+          <i :class="sidebarCollapsed ? 'pi pi-angle-right' : 'pi pi-angle-left'"></i>
+        </button>
       </div>
       <nav class="sidebar-nav">
         <router-link to="/chat" class="nav-item">
@@ -58,6 +61,13 @@ const auth = useAuthStore();
 const router = useRouter();
 
 const isDark = ref(localStorage.getItem("knora-theme") === "dark");
+const sidebarCollapsed = ref(
+  localStorage.getItem("knora-sidebar") === "collapsed",
+);
+
+watch(sidebarCollapsed, (v) => {
+  localStorage.setItem("knora-sidebar", v ? "collapsed" : "expanded");
+});
 
 onMounted(() => {
   applyTheme();
@@ -159,11 +169,24 @@ body {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  transition: width 0.2s ease;
+  overflow: hidden;
+}
+.app-sidebar.collapsed {
+  width: 60px;
 }
 
 .sidebar-header {
   padding: 1.25rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.app-sidebar.collapsed .sidebar-header {
+  justify-content: center;
+  padding: 1.25rem 0;
 }
 
 .sidebar-logo {
@@ -172,6 +195,32 @@ body {
   color: #fff;
   text-decoration: none;
   letter-spacing: -0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.app-sidebar.collapsed .sidebar-logo {
+  font-size: 1.5rem;
+}
+
+.sidebar-toggle {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--color-sidebar-text);
+  font-size: 0.75rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.sidebar-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.app-sidebar.collapsed .sidebar-toggle {
+  display: none;
 }
 
 .sidebar-nav {
@@ -179,6 +228,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+}
+.app-sidebar.collapsed .sidebar-nav {
+  padding: 0.75rem 0.5rem;
+  align-items: center;
 }
 
 .nav-item {
@@ -193,6 +246,12 @@ body {
   transition:
     background 0.15s,
     color 0.15s;
+  white-space: nowrap;
+}
+.app-sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 0.7rem;
+  width: 44px;
 }
 
 .nav-item:hover {
@@ -211,6 +270,14 @@ body {
   width: 1.25rem;
   text-align: center;
 }
+.app-sidebar.collapsed .nav-item i {
+  width: auto;
+  font-size: 1.2rem;
+}
+
+.app-sidebar.collapsed .nav-item span {
+  display: none;
+}
 
 /* Sidebar Footer */
 .sidebar-footer {
@@ -219,6 +286,11 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+.app-sidebar.collapsed .sidebar-footer {
+  flex-direction: column;
+  padding: 0.5rem;
+  gap: 0.4rem;
 }
 
 .sidebar-footer .sidebar-user {
@@ -232,6 +304,9 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.app-sidebar.collapsed .sidebar-user {
+  display: none;
 }
 
 .theme-toggle {
@@ -249,6 +324,10 @@ body {
   transition:
     background 0.15s,
     border-color 0.15s;
+}
+.app-sidebar.collapsed .theme-toggle {
+  padding: 0.4rem;
+  font-size: 1rem;
 }
 
 .theme-toggle:hover {
@@ -268,6 +347,9 @@ body {
   transition:
     background 0.15s,
     border-color 0.15s;
+}
+.app-sidebar.collapsed .sidebar-logout {
+  display: none;
 }
 
 .sidebar-logout:hover {
