@@ -1,89 +1,93 @@
 <template>
   <main class="wiki-content">
-      <div class="wiki-header">
-        <router-link :to="'/wiki/' + workspaceId" class="back-link"
-          >← Übersicht</router-link
-        >
-        <h3 v-if="!editing">{{ page?.title || "Lädt..." }}</h3>
-        <div class="header-actions" v-if="page">
-          <button class="btn-secondary" @click="editing = !editing">
-            {{ editing ? "🔍 Vorschau" : "✏️ Bearbeiten" }}
-          </button>
-          <button class="btn-danger-sm" @click="deletePage">Löschen</button>
-        </div>
+    <div class="wiki-header">
+      <router-link :to="'/wiki/' + workspaceId" class="back-link"
+        >← Übersicht</router-link
+      >
+      <h3 v-if="!editing">{{ page?.title || "Lädt..." }}</h3>
+      <div class="header-actions" v-if="page">
+        <button class="btn-secondary" @click="editing = !editing">
+          {{ editing ? "🔍 Vorschau" : "✏️ Bearbeiten" }}
+        </button>
+        <button class="btn-danger-sm" @click="deletePage">Löschen</button>
       </div>
+    </div>
 
-      <div v-if="!page && !loading" class="wiki-empty">
-        <p>Seite nicht gefunden.</p>
-        <router-link :to="'/wiki/' + workspaceId" class="back-link"
-          >Zurück zur Übersicht</router-link
-        >
+    <div v-if="!page && !loading" class="wiki-empty">
+      <p>Seite nicht gefunden.</p>
+      <router-link :to="'/wiki/' + workspaceId" class="back-link"
+        >Zurück zur Übersicht</router-link
+      >
+    </div>
+
+    <div v-if="loading" class="wiki-loading">Lade Seite...</div>
+
+    <!-- Edit Mode -->
+    <div v-if="page && editing" class="wiki-edit">
+      <div class="field">
+        <label>Titel</label>
+        <input v-model="editTitle" />
       </div>
-
-      <div v-if="loading" class="wiki-loading">Lade Seite...</div>
-
-      <!-- Edit Mode -->
-      <div v-if="page && editing" class="wiki-edit">
-        <div class="field">
-          <label>Titel</label>
-          <input v-model="editTitle" />
-        </div>
-        <div class="field">
-          <label>Summary</label>
-          <input v-model="editSummary" />
-        </div>
-        <div class="field">
-          <label>Inhalt (Markdown)</label>
-          <textarea v-model="editContent" class="editor-textarea"></textarea>
-        </div>
-        <div class="edit-actions">
-          <button class="btn-primary" @click="savePage">💾 Speichern</button>
-          <button class="btn-secondary" @click="editing = false">
-            Abbrechen
-          </button>
-        </div>
+      <div class="field">
+        <label>Summary</label>
+        <input v-model="editSummary" />
       </div>
+      <div class="field">
+        <label>Inhalt (Markdown)</label>
+        <textarea v-model="editContent" class="editor-textarea"></textarea>
+      </div>
+      <div class="edit-actions">
+        <button class="btn-primary" @click="savePage">💾 Speichern</button>
+        <button class="btn-secondary" @click="editing = false">
+          Abbrechen
+        </button>
+      </div>
+    </div>
 
-      <!-- View Mode -->
-      <div v-if="page && !editing" class="wiki-article">
-        <div class="article-summary" v-if="page.summary">
-          {{ page.summary }}
-        </div>
-        <div class="article-content" v-html="renderedContent"></div>
-        <div class="article-footer">
-          <div v-if="page.out_links?.length" class="links-section">
-            <h4>→ Verlinkt zu</h4>
-            <div class="link-chips">
-              <router-link
-                v-for="slug in page.out_links"
-                :key="slug"
-                :to="`/wiki/${workspaceId}/${encodeURIComponent(slug)}`"
-                class="link-chip"
-                >{{ slug.split("/").pop() }}</router-link
-              >
-            </div>
-          </div>
-          <div v-if="page.in_links?.length" class="links-section">
-            <h4>← Verlinkt von</h4>
-            <div class="link-chips">
-              <router-link
-                v-for="slug in page.in_links"
-                :key="slug"
-                :to="`/wiki/${workspaceId}/${encodeURIComponent(slug)}`"
-                class="link-chip"
-                >{{ slug.split("/").pop() }}</router-link
-              >
-            </div>
-          </div>
-          <div class="page-meta">
-            <span>Version {{ page.version }}</span>
-            <span>Zuletzt bearbeitet: {{ formatDate(page.updated_at) }}</span>
+    <!-- View Mode -->
+    <div v-if="page && !editing" class="wiki-article">
+      <div class="article-summary" v-if="page.summary">
+        {{ page.summary }}
+      </div>
+      <div class="article-content" v-html="renderedContent"></div>
+      <div class="article-footer">
+        <div v-if="page.out_links?.length" class="links-section">
+          <h4>→ Verlinkt zu</h4>
+          <div class="link-chips">
+            <router-link
+              v-for="slug in page.out_links"
+              :key="slug"
+              :to="`/wiki/${workspaceId}/${encodeURIComponent(slug)}`"
+              class="link-chip"
+              >{{ slug.split("/").pop() }}</router-link
+            >
           </div>
         </div>
+        <div v-if="page.in_links?.length" class="links-section">
+          <h4>← Verlinkt von</h4>
+          <div class="link-chips">
+            <router-link
+              v-for="slug in page.in_links"
+              :key="slug"
+              :to="`/wiki/${workspaceId}/${encodeURIComponent(slug)}`"
+              class="link-chip"
+              >{{ slug.split("/").pop() }}</router-link
+            >
+          </div>
+        </div>
+        <div class="page-meta">
+          <span>Version {{ page.version }}</span>
+          <span>Zuletzt bearbeitet: {{ formatDate(page.updated_at) }}</span>
+        </div>
       </div>
-    </main>
-    <ConfirmModal :show="showConfirm" :options="confirmOptions" :on-confirm="onConfirm" :on-cancel="onCancel" />
-  </div>
+    </div>
+    <ConfirmModal
+      :show="showConfirm"
+      :options="confirmOptions"
+      :on-confirm="onConfirm"
+      :on-cancel="onCancel"
+    />
+  </main>
 </template>
 
 <script setup lang="ts">
@@ -99,7 +103,13 @@ import DOMPurify from "dompurify";
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const { show: showConfirm, options: confirmOptions, ask: askConfirm, onConfirm, onCancel } = useConfirm();
+const {
+  show: showConfirm,
+  options: confirmOptions,
+  ask: askConfirm,
+  onConfirm,
+  onCancel,
+} = useConfirm();
 const workspaceId = route.params.workspaceId as string;
 const pageSlug = route.params.slug as string;
 

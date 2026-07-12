@@ -305,7 +305,12 @@
         <p v-if="settingsError" class="error">{{ settingsError }}</p>
       </div>
     </div>
-    <ConfirmModal :show="showConfirm" :options="confirmOptions" :on-confirm="onConfirm" :on-cancel="onCancel" />
+    <ConfirmModal
+      :show="showConfirm"
+      :options="confirmOptions"
+      :on-confirm="onConfirm"
+      :on-cancel="onCancel"
+    />
   </main>
 </template>
 
@@ -340,7 +345,13 @@ const showSettings = ref(false);
 const editName = ref("");
 const editDesc = ref("");
 const settingsError = ref("");
-const { show: showConfirm, options: confirmOptions, ask: askConfirm, onConfirm, onCancel } = useConfirm();
+const {
+  show: showConfirm,
+  options: confirmOptions,
+  ask: askConfirm,
+  onConfirm,
+  onCancel,
+} = useConfirm();
 
 // Import
 const showImport = ref(false);

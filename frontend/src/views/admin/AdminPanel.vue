@@ -222,6 +222,7 @@
           </div>
         </div>
       </div>
+    </div>
     <ConfirmModal :show="showConfirm" :options="confirmOptions" :on-confirm="onConfirm" :on-cancel="onCancel" />
   </main>
 </template>
