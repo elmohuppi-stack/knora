@@ -3,7 +3,8 @@
 import { ref } from "vue";
 import axios from "axios";
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function useWorkspace() {
   const resolving = ref(false);
@@ -15,7 +16,9 @@ export function useWorkspace() {
   }
 
   /** Löst einen Workspace-Bezeichner (UUID oder Slug) in ein Workspace-Objekt auf */
-  async function resolveWorkspace(workspaceId: string): Promise<{ id: string; name: string; slug: string } | null> {
+  async function resolveWorkspace(
+    workspaceId: string,
+  ): Promise<{ id: string; name: string; slug: string } | null> {
     if (isUUID(workspaceId)) {
       try {
         const res = await axios.get(`/api/v1/workspaces/${workspaceId}`);
@@ -34,7 +37,8 @@ export function useWorkspace() {
       const ws = res.data.workspace;
       return ws ? { id: ws.id, name: ws.name, slug: ws.slug } : null;
     } catch (e: any) {
-      resolveError.value = e.response?.data?.error || `Workspace "${workspaceId}" nicht gefunden`;
+      resolveError.value =
+        e.response?.data?.error || `Workspace "${workspaceId}" nicht gefunden`;
       return null;
     } finally {
       resolving.value = false;

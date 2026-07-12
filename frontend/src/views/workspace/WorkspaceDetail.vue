@@ -124,11 +124,13 @@
 import { ref, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
+import { useConfirm } from "../../composables/useConfirm";
 import axios from "axios";
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
+const confirm = useConfirm();
 const ws = ref<any>(null);
 const showEdit = ref(false);
 const editName = ref("");
@@ -169,7 +171,12 @@ async function updateWs() {
 }
 
 async function deleteWs() {
-  if (!confirm(`Workspace "${ws.value?.name}" wirklich löschen?`)) return;
+  const ok = await confirm.confirm({
+    title: "Workspace löschen",
+    message: `Soll der Workspace „${ws.value?.name}” wirklich gelöscht werden?`,
+    confirmText: "Endgültig löschen",
+  });
+  if (!ok) return;
   try {
     await axios.delete(`/api/v1/workspaces/${workspaceId}`);
     router.push("/workspaces");

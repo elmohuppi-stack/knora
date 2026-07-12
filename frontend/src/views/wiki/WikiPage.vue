@@ -82,6 +82,7 @@
         </div>
       </div>
     </main>
+    <ConfirmModal :show="confirm.show" :options="confirm.options" :on-confirm="confirm.onConfirm" :on-cancel="confirm.onCancel" />
   </div>
 </template>
 
@@ -89,6 +90,8 @@
 import { ref, computed, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
+import { useConfirm } from "../../composables/useConfirm";
+import ConfirmModal from "../../components/ConfirmModal.vue";
 import axios from "axios";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
@@ -96,6 +99,7 @@ import DOMPurify from "dompurify";
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
+const confirm = useConfirm();
 const workspaceId = route.params.workspaceId as string;
 const pageSlug = route.params.slug as string;
 
@@ -163,7 +167,12 @@ async function savePage() {
 }
 
 async function deletePage() {
-  if (!confirm("Seite löschen?")) return;
+  const ok = await confirm.confirm({
+    title: "Seite löschen",
+    message: "Soll diese Wiki-Seite wirklich gelöscht werden?",
+    confirmText: "Löschen",
+  });
+  if (!ok) return;
   try {
     await axios.delete(
       `/api/v1/wiki/${workspaceId}/pages/${encodeURIComponent(pageSlug)}`,

@@ -10,8 +10,16 @@
       </div>
       <div class="header-actions">
         <div class="tab-bar">
-          <router-link :to="'/documents/' + (workspaceSlug || workspaceId)" class="tab">📄 Dokumente</router-link>
-          <router-link :to="'/wiki/' + (workspaceSlug || workspaceId)" class="tab active">📖 Wiki</router-link>
+          <router-link
+            :to="'/documents/' + (workspaceSlug || workspaceId)"
+            class="tab"
+            >📄 Dokumente</router-link
+          >
+          <router-link
+            :to="'/wiki/' + (workspaceSlug || workspaceId)"
+            class="tab active"
+            >📖 Wiki</router-link
+          >
         </div>
         <button
           class="btn-icon"
@@ -66,7 +74,9 @@
             :key="p.id"
             class="page-card"
             @click="
-              $router.push(`/wiki/${workspaceSlug || workspaceId}/${encodeURIComponent(p.slug)}`)
+              $router.push(
+                `/wiki/${workspaceSlug || workspaceId}/${encodeURIComponent(p.slug)}`,
+              )
             "
           >
             <div class="page-type-badge">{{ typeIcon(p.page_type) }}</div>
@@ -294,7 +304,7 @@
         </div>
         <p v-if="settingsError" class="error">{{ settingsError }}</p>
       </div>
-    </div>
+    <ConfirmModal :show="confirm.show" :options="confirm.options" :on-confirm="confirm.onConfirm" :on-cancel="confirm.onCancel" />
   </main>
 </template>
 
@@ -303,6 +313,8 @@ import { ref, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { useWorkspace } from "../../composables/useWorkspace";
+import { useConfirm } from "../../composables/useConfirm";
+import ConfirmModal from "../../components/ConfirmModal.vue";
 import axios from "axios";
 
 const auth = useAuthStore();
@@ -327,6 +339,7 @@ const showSettings = ref(false);
 const editName = ref("");
 const editDesc = ref("");
 const settingsError = ref("");
+const confirm = useConfirm();
 
 // Import
 const showImport = ref(false);
@@ -387,7 +400,12 @@ async function updateWs() {
 }
 
 async function deleteWs() {
-  if (!confirm(`Workspace "${ws.value?.name}" wirklich löschen?`)) return;
+  const ok = await confirm.confirm({
+    title: "Workspace löschen",
+    message: `Soll der Workspace „${ws.value?.name}” wirklich gelöscht werden? Alle Wiki-Seiten und Dokumente werden entfernt.`,
+    confirmText: "Endgültig löschen",
+  });
+  if (!ok) return;
   try {
     await axios.delete(`/api/v1/workspaces/${workspaceId.value}`);
     router.push("/workspaces");
@@ -407,7 +425,7 @@ async function loadWorkspaces() {
 function onWorkspaceSelect() {
   if (workspaceId.value) {
     const ws = workspaces.value.find((w: any) => w.id === workspaceId.value);
-    router.push('/wiki/' + (ws?.slug || workspaceId.value));
+    router.push("/wiki/" + (ws?.slug || workspaceId.value));
   }
 }
 

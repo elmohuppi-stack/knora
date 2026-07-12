@@ -222,7 +222,7 @@
           </div>
         </div>
       </div>
-    </div>
+    <ConfirmModal :show="confirm.show" :options="confirm.options" :on-confirm="confirm.onConfirm" :on-cancel="confirm.onCancel" />
   </main>
 </template>
 
@@ -230,10 +230,13 @@
 import { ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
+import { useConfirm } from "../../composables/useConfirm";
+import ConfirmModal from "../../components/ConfirmModal.vue";
 import axios from "axios";
 
 const auth = useAuthStore();
 const router = useRouter();
+const confirm = useConfirm();
 const tab = ref("users");
 const users = ref<any[]>([]);
 const providers = ref<any[]>([]);
@@ -296,7 +299,8 @@ async function updateRole(u: any) {
 }
 
 async function deleteUser(u: any) {
-  if (!confirm(`Benutzer "${u.name}" löschen?`)) return;
+  const ok = await confirm.confirm({ title: "Benutzer löschen", message: `Soll der Benutzer „${u.name}” gelöscht werden?`, confirmText: "Löschen" });
+  if (!ok) return;
   try {
     await axios.delete(`/api/v1/admin/users/${u.id}`);
     users.value = users.value.filter((x: any) => x.id !== u.id);
@@ -333,7 +337,12 @@ async function createProvider() {
 }
 
 async function deleteProvider(id: string) {
-  if (!confirm("Provider löschen?")) return;
+  const ok = await confirm.confirm({
+    title: "Provider löschen",
+    message: "Soll dieser Model-Provider gelöscht werden?",
+    confirmText: "Löschen",
+  });
+  if (!ok) return;
   try {
     await axios.delete(`/api/v1/models/${id}`);
     providers.value = providers.value.filter((p: any) => p.id !== id);

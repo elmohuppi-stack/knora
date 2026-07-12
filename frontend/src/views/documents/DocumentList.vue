@@ -10,8 +10,16 @@
       </div>
       <div class="header-actions">
         <div class="tab-bar">
-          <router-link :to="'/documents/' + (workspaceSlug || workspaceId)" class="tab active">📄 Dokumente</router-link>
-          <router-link :to="'/wiki/' + (workspaceSlug || workspaceId)" class="tab">📖 Wiki</router-link>
+          <router-link
+            :to="'/documents/' + (workspaceSlug || workspaceId)"
+            class="tab active"
+            >📄 Dokumente</router-link
+          >
+          <router-link
+            :to="'/wiki/' + (workspaceSlug || workspaceId)"
+            class="tab"
+            >📖 Wiki</router-link
+          >
         </div>
         <button
           class="btn-icon"
@@ -261,6 +269,12 @@
         <p v-if="settingsError" class="error">{{ settingsError }}</p>
       </div>
     </div>
+    <ConfirmModal
+      :show="confirm.show"
+      :options="confirm.options"
+      :on-confirm="confirm.onConfirm"
+      :on-cancel="confirm.onCancel"
+    />
   </main>
 </template>
 
@@ -269,12 +283,15 @@ import { ref, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { useWorkspace } from "../../composables/useWorkspace";
+import { useConfirm } from "../../composables/useConfirm";
+import ConfirmModal from "../../components/ConfirmModal.vue";
 import axios from "axios";
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 const { resolveWorkspace, isUUID, resolving } = useWorkspace();
+const confirm = useConfirm();
 
 const rawWorkspaceId = route.params.workspaceId as string;
 const workspaceId = ref(rawWorkspaceId);
@@ -362,7 +379,12 @@ async function updateWs() {
 }
 
 async function deleteWs() {
-  if (!confirm(`Workspace "${ws.value?.name}" wirklich löschen?`)) return;
+  const ok = await confirm.confirm({
+    title: "Workspace löschen",
+    message: `Soll der Workspace „${ws.value?.name}” wirklich gelöscht werden? Alle Dokumente und Wiki-Seiten werden entfernt.`,
+    confirmText: "Endgültig löschen",
+  });
+  if (!ok) return;
   try {
     await axios.delete(`/api/v1/workspaces/${workspaceId.value}`);
     router.push("/workspaces");
@@ -447,7 +469,12 @@ async function importYoutube() {
 }
 
 async function deleteDoc(id: string) {
-  if (!confirm("Dokument löschen?")) return;
+  const ok = await confirm.confirm({
+    title: "Dokument löschen",
+    message: "Soll dieses Dokument wirklich gelöscht werden?",
+    confirmText: "Löschen",
+  });
+  if (!ok) return;
   try {
     await axios.delete(`/api/v1/documents/${id}`);
     docs.value = docs.value.filter((d: any) => d.id !== id);
