@@ -174,7 +174,10 @@ wikiRouter.post("/:workspaceId/generate/:documentId", async (c) => {
     pages.push(page);
 
     // Links auflösen
-    const { out_links } = await wikiService.resolveLinks(workspaceId, article.content);
+    const { out_links } = await wikiService.resolveLinks(
+      workspaceId,
+      article.content,
+    );
     if (out_links.length > 0) {
       await wikiService.updatePage(workspaceId, slug, { out_links });
       await wikiService.updateIncomingLinks(workspaceId, slug, out_links);

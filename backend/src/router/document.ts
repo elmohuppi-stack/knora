@@ -334,7 +334,9 @@ async function scheduleWikiGeneration(
         }
         allSlugs.push(slug);
 
-        console.log(`[doc] Wiki-Seite wird erstellt: slug="${slug}", title="${article.title}"`);
+        console.log(
+          `[doc] Wiki-Seite wird erstellt: slug="${slug}", title="${article.title}"`,
+        );
         const page = await createPage({
           workspace_id: workspaceId,
           slug,
@@ -352,9 +354,14 @@ async function scheduleWikiGeneration(
           try {
             await updatePage(workspaceId, slug, { out_links });
             await updateIncomingLinks(workspaceId, slug, out_links);
-            console.log(`[doc] ${out_links.length} Wiki-Links für "${slug}" aufgelöst`);
+            console.log(
+              `[doc] ${out_links.length} Wiki-Links für "${slug}" aufgelöst`,
+            );
           } catch (linkErr: any) {
-            console.warn(`[doc] Link-Resolution fehlgeschlagen:`, linkErr.message);
+            console.warn(
+              `[doc] Link-Resolution fehlgeschlagen:`,
+              linkErr.message,
+            );
           }
         }
       }

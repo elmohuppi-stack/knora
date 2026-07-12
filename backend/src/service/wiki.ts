@@ -393,15 +393,13 @@ export async function generateWikiPage(
   workspaceId: string,
   documentId: string,
   existingSlugs: string[],
-): Promise<
-  Array<{
-    slug: string;
-    title: string;
-    summary: string;
-    content: string;
-    page_type: string;
-  }> | null
-> {
+): Promise<Array<{
+  slug: string;
+  title: string;
+  summary: string;
+  content: string;
+  page_type: string;
+}> | null> {
   const t0 = Date.now();
   console.log(`[wiki] ========== generateWikiPage START ==========`);
   console.log(`[wiki] Document ID: ${documentId}`);
@@ -588,7 +586,12 @@ ${doc.content}`;
       let content = raw.replace(/^SUMMARY:\s*.+(\r?\n|$)/i, "").trim();
 
       // "=== ARTIKEL 1:"-Marker entfernen falls vorhanden
-      content = content.replace(/^=== ARTIKEL \d:?\s*(VOLLSTAENDIG|ZUSAMMENFASSUNG)?\s*===?/i, "").trim();
+      content = content
+        .replace(
+          /^=== ARTIKEL \d:?\s*(VOLLSTAENDIG|ZUSAMMENFASSUNG)?\s*===?/i,
+          "",
+        )
+        .trim();
 
       if (!content) {
         console.warn(`[wiki] Artikel ${index}: kein Inhalt gefunden`);
@@ -596,7 +599,9 @@ ${doc.content}`;
       }
 
       const titleMatch = content.match(/^#\s+(.+)/m);
-      const title = titleMatch ? titleMatch[1].trim() : `${fallbackTitle} (Teil ${index})`;
+      const title = titleMatch
+        ? titleMatch[1].trim()
+        : `${fallbackTitle} (Teil ${index})`;
 
       return { summary, title, content };
     }
@@ -638,8 +643,16 @@ ${doc.content}`;
         }
       }
 
-      console.log(`[wiki] ✅ Artikel 1 (vollstaendig): "${article1.title}" (${content.length} Zeichen)`);
-      results.push({ slug, title: article1.title, summary: article1.summary, content, page_type: "vollstaendig" });
+      console.log(
+        `[wiki] ✅ Artikel 1 (vollstaendig): "${article1.title}" (${content.length} Zeichen)`,
+      );
+      results.push({
+        slug,
+        title: article1.title,
+        summary: article1.summary,
+        content,
+        page_type: "vollstaendig",
+      });
     }
 
     if (article2) {
@@ -661,11 +674,21 @@ ${doc.content}`;
         }
       }
 
-      console.log(`[wiki] ✅ Artikel 2 (zusammenfassung): "${article2.title}" (${content.length} Zeichen)`);
-      results.push({ slug, title: article2.title, summary: article2.summary, content, page_type: "zusammenfassung" });
+      console.log(
+        `[wiki] ✅ Artikel 2 (zusammenfassung): "${article2.title}" (${content.length} Zeichen)`,
+      );
+      results.push({
+        slug,
+        title: article2.title,
+        summary: article2.summary,
+        content,
+        page_type: "zusammenfassung",
+      });
     }
 
-    console.log(`[wiki] ========== generateWikiPage ENDE (${Date.now() - t0}ms, ${results.length} Artikel) ==========`);
+    console.log(
+      `[wiki] ========== generateWikiPage ENDE (${Date.now() - t0}ms, ${results.length} Artikel) ==========`,
+    );
     return results.length > 0 ? results : null;
   } catch (e: any) {
     console.error(`[wiki] ❌ Generation error:`, e.message);

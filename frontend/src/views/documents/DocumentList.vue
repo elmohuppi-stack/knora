@@ -147,9 +147,8 @@
             </td>
             <td class="date">{{ formatDate(doc.created_at) }}</td>
             <td>
-              <button class="btn-danger-sm" @click="deleteDoc(doc.id)">
-                ✕
-              </button>
+              <button class="btn-icon-sm" @click="generateWithConfirm(doc.id)" title="Wiki-Artikel generieren">📖</button>
+              <button class="btn-danger-sm" @click="deleteDoc(doc.id)">✕</button>
             </td>
           </tr>
         </tbody>
@@ -352,23 +351,34 @@ function showDocDetail(doc: any) {
   wikiGenResult.value = "";
 }
 
-async function generateWikiForDoc(docId: string) {
-  generatingWiki.value = true;
-  wikiGenResult.value = "";
+async function generateWithConfirm(docId: string) {
+  const doc = docs.value.find((d: any) => d.id === docId);
+  const ok = await askConfirm({
+    title: "Wiki-Artikel generieren",
+    message: `Sollen aus dem Dokument „${doc?.title || docId}” Wiki-Artikel erstellt werden? Es werden ein vollständiger Artikel und eine Zusammenfassung generiert.`,
+    confirmText: "Generieren",
+  });
+  if (!ok) return;
+  await generateWikiForDoc(docId, true);
+}
+
+async function generateWikiForDoc(docId: string, silent = false) {
+  if (!silent) generatingWiki.value = true;
+  if (!silent) wikiGenResult.value = "";
   try {
     const res = await axios.post(
       `/api/v1/wiki/${workspaceId.value}/generate/${docId}`,
     );
     const pages = res.data.pages || [];
     if (pages.length > 0) {
-      wikiGenResult.value = `✅ ${pages.length} Artikel erstellt: „${pages[0].title}”`;
+      if (!silent) wikiGenResult.value = `✅ ${pages.length} Artikel erstellt: „${pages[0].title}”`;
     } else {
-      wikiGenResult.value = "⚠️ Keine Artikel generiert";
+      if (!silent) wikiGenResult.value = "⚠️ Keine Artikel generiert";
     }
   } catch (e: any) {
-    wikiGenResult.value = "❌ " + (e.response?.data?.error || e.message);
+    if (!silent) wikiGenResult.value = "❌ " + (e.response?.data?.error || e.message);
   } finally {
-    generatingWiki.value = false;
+    if (!silent) generatingWiki.value = false;
   }
 }
 
@@ -801,6 +811,19 @@ function formatDate(dateStr: string) {
   border-radius: 6px;
   font-size: 0.9rem;
   cursor: pointer;
+}
+.btn-icon-sm {
+  padding: 0.25rem 0.5rem;
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  margin-right: 0.25rem;
+}
+.btn-icon-sm:hover {
+  background: var(--color-bg-secondary);
 }
 .btn-danger-sm {
   padding: 0.25rem 0.5rem;
