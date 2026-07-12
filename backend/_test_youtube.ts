@@ -91,7 +91,8 @@ for (const [url, expected] of TEST_URLS) {
 heading("ApifyProvider – Direkter Unit-Test");
 
 const API_KEY =
-  process.env.APIFY_API_KEY || "APIFY_API_KEY";
+  process.env.APIFY_API_KEY;
+if (!API_KEY.trim()) { throw new Error("APIFY_API_KEY nicht gesetzt"); }
 
 try {
   const provider = new ApifyProvider(API_KEY);
