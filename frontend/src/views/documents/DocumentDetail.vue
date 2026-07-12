@@ -59,6 +59,22 @@
           </div>
         </div>
 
+        <!-- Wiki-Artikel Verweis -->
+        <div v-if="wikiPages.length > 0" style="margin:1rem 0;">
+          <h4>📖 Wiki-Artikel</h4>
+          <div class="wiki-links">
+            <router-link
+              v-for="wp in wikiPages"
+              :key="wp.id"
+              :to="`/wiki/${workspaceId}/${encodeURIComponent(wp.slug)}`"
+              class="wiki-link-chip"
+            >
+              {{ wp.title }}
+              <span class="wiki-type-badge">{{ wp.page_type === "vollstaendig" ? "Vollständig" : "Zusammenfassung" }}</span>
+            </router-link>
+          </div>
+        </div>
+
         <!-- Transkript / Inhalt -->
         <h4 style="margin-top:1.5rem;">📝 Transkript</h4>
         <div class="transcript-box" v-if="doc.content">
@@ -83,6 +99,7 @@ const workspaceId = route.params.workspaceId as string;
 const documentId = route.params.documentId as string;
 
 const doc = ref<any>(null);
+const wikiPages = ref<any[]>([]);
 const generating = ref(false);
 const genResult = ref("");
 
@@ -99,7 +116,7 @@ onMounted(async () => {
     router.push("/login");
     return;
   }
-  await loadDoc();
+  await Promise.all([loadDoc(), loadWikiPages()]);
 });
 
 async function loadDoc() {
@@ -108,6 +125,17 @@ async function loadDoc() {
     doc.value = res.data.document;
   } catch (e: any) {
     console.error("Failed to load document", e);
+  }
+}
+
+async function loadWikiPages() {
+  try {
+    const res = await axios.get(`/api/v1/wiki/${workspaceId}/pages`, {
+      params: { source_document_id: documentId },
+    });
+    wikiPages.value = res.data.pages || [];
+  } catch (e: any) {
+    console.error("Failed to load wiki pages", e);
   }
 }
 
@@ -234,6 +262,38 @@ function formatDate(dateStr: string) {
 }
 .meta-card a {
   color: var(--color-primary);
+}
+
+/* Wiki Links */
+.wiki-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.wiki-link-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  background: white;
+  transition: background 0.15s;
+}
+.wiki-link-chip:hover {
+  background: var(--color-bg-secondary);
+}
+.wiki-type-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  margin-left: auto;
 }
 
 /* Transkript */

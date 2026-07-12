@@ -29,11 +29,13 @@ wikiRouter.get("/:workspaceId/pages", async (c) => {
   const workspaceId = c.req.param("workspaceId");
   const pageType = c.req.query("page_type");
   const query = c.req.query("query");
+  const sourceDocId = c.req.query("source_document_id");
   const page = parseInt(c.req.query("page") || "1");
 
   const result = await wikiService.listPages(workspaceId, {
     page_type: pageType,
     query,
+    source_document_id: sourceDocId,
     page,
   });
   return c.json(result);

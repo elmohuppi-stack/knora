@@ -9,6 +9,7 @@ export async function listPages(
   options?: {
     page_type?: string;
     query?: string;
+    source_document_id?: string;
     page?: number;
     page_size?: number;
   },
@@ -28,6 +29,12 @@ export async function listPages(
         like(wikiPages.title, `%${options.query}%`),
         like(wikiPages.content, `%${options.query}%`),
       ),
+    )!;
+  }
+  if (options?.source_document_id) {
+    conditions = and(
+      conditions,
+      eq(wikiPages.source_document_id, options.source_document_id),
     )!;
   }
 
