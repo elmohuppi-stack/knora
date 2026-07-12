@@ -2,21 +2,34 @@
   <main class="main-content">
     <div class="header">
       <div class="header-left">
-        <router-link to="/workspaces" class="back-link">← Übersicht</router-link>
+        <router-link to="/workspaces" class="back-link"
+          >← Übersicht</router-link
+        >
         <h3 v-if="ws">{{ ws.name }}</h3>
         <h3 v-else>📄 Übersicht</h3>
       </div>
       <div class="header-actions">
-        <button class="btn-icon" @click="showSettings = true" title="Workspace-Einstellungen">⚙️</button>
-        <button class="btn-primary" @click="showUpload = true">📤 Upload</button>
+        <button
+          class="btn-icon"
+          @click="showSettings = true"
+          title="Workspace-Einstellungen"
+        >
+          ⚙️
+        </button>
+        <button class="btn-primary" @click="showUpload = true">
+          📤 Upload
+        </button>
         <button class="btn-primary" @click="showUrl = true">🔗 URL</button>
-        <button class="btn-primary" @click="showYoutube = true">▶️ YouTube</button>
+        <button class="btn-primary" @click="showYoutube = true">
+          ▶️ YouTube
+        </button>
       </div>
     </div>
     <div class="header-sub">
-      <router-link to="/settings" class="log-link">📋 Aktivitätslog</router-link>
+      <router-link to="/settings" class="log-link"
+        >📋 Aktivitätslog</router-link
+      >
     </div>
-
 
     <!-- Upload Area -->
     <div v-if="showUpload" class="upload-area">
@@ -103,19 +116,42 @@
         </thead>
         <tbody>
           <tr v-for="item in allItems" :key="item._key">
-            <td class="doc-title" @click="openItem(item)" style="cursor:pointer">
+            <td
+              class="doc-title"
+              @click="openItem(item)"
+              style="cursor: pointer"
+            >
               {{ item.title }}
-              <span class="item-subtitle" v-if="item._type === 'wiki'">aus dem YouTube-Import „{{ item.source_title }}”</span>
+              <span class="item-subtitle" v-if="item._type === 'wiki'"
+                >aus dem YouTube-Import „{{ item.source_title }}”</span
+              >
             </td>
-            <td><span class="type-badge">{{ item._typeLabel }}</span></td>
             <td>
-              <span v-if="item._type === 'doc'" :class="['status', item.parse_status]">{{ statusLabel(item.parse_status) }}</span>
-              <span v-else-if="item._type === 'wiki'" class="status completed">✅ Veröffentlicht</span>
+              <span class="type-badge">{{ item._typeLabel }}</span>
+            </td>
+            <td>
+              <span
+                v-if="item._type === 'doc'"
+                :class="['status', item.parse_status]"
+                >{{ statusLabel(item.parse_status) }}</span
+              >
+              <span v-else-if="item._type === 'wiki'" class="status completed"
+                >✅ Veröffentlicht</span
+              >
             </td>
             <td class="date">{{ formatDate(item._date) }}</td>
             <td>
-              <button class="btn-icon-sm" v-if="item._type === 'doc'" @click.stop="generateWithConfirm(item.id)" title="Wiki-Artikel generieren">📖</button>
-              <button class="btn-danger-sm" @click.stop="deleteItem(item)">✕</button>
+              <button
+                class="btn-icon-sm"
+                v-if="item._type === 'doc'"
+                @click.stop="generateWithConfirm(item.id)"
+                title="Wiki-Artikel generieren"
+              >
+                📖
+              </button>
+              <button class="btn-danger-sm" @click.stop="deleteItem(item)">
+                ✕
+              </button>
             </td>
           </tr>
         </tbody>
@@ -260,7 +296,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { useWorkspace } from "../../composables/useWorkspace";
@@ -327,12 +363,14 @@ const allItems = computed(() => {
   const wikiList = wikiPages.value.map((w: any) => ({
     _key: "wiki-" + w.id,
     _type: "wiki" as const,
-    _typeLabel: w.page_type === "vollstaendig" ? "📖 Wiki (vollst.)" : "📖 Wiki (Zsf.)",
+    _typeLabel:
+      w.page_type === "vollstaendig" ? "📖 Wiki (vollst.)" : "📖 Wiki (Zsf.)",
     _date: w.created_at,
     id: w.id,
     title: w.title,
     slug: w.slug,
-    source_title: docs.value.find((d: any) => d.id === w.source_document_id)?.title || "",
+    source_title:
+      docs.value.find((d: any) => d.id === w.source_document_id)?.title || "",
     page_type: w.page_type,
   }));
   return [...docsList, ...wikiList].sort(
@@ -344,7 +382,9 @@ function openItem(item: any) {
   if (item._type === "doc") {
     router.push(`/documents/${workspaceId.value}/${item.id}`);
   } else {
-    router.push(`/wiki/${workspaceSlug.value || workspaceId.value}/${encodeURIComponent(item.slug)}`);
+    router.push(
+      `/wiki/${workspaceSlug.value || workspaceId.value}/${encodeURIComponent(item.slug)}`,
+    );
   }
 }
 
@@ -359,7 +399,9 @@ async function deleteItem(item: any) {
     });
     if (!ok) return;
     try {
-      await axios.delete(`/api/v1/wiki/${workspaceId.value}/pages/${encodeURIComponent(item.slug)}`);
+      await axios.delete(
+        `/api/v1/wiki/${workspaceId.value}/pages/${encodeURIComponent(item.slug)}`,
+      );
       wikiPages.value = wikiPages.value.filter((w: any) => w.id !== item.id);
     } catch {
       alert("Fehler beim Löschen");
@@ -432,7 +474,9 @@ onMounted(async () => {
 
 async function loadWikiPages() {
   try {
-    const res = await axios.get(`/api/v1/wiki/${workspaceId.value}/pages`, { params: { page_size: 200 } });
+    const res = await axios.get(`/api/v1/wiki/${workspaceId.value}/pages`, {
+      params: { page_size: 200 },
+    });
     wikiPages.value = res.data.pages || [];
   } catch (e: any) {
     console.error("Failed to load wiki pages", e);
