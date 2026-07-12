@@ -79,11 +79,17 @@
 
       <!-- Tab: Aktivitäten -->
       <div v-if="activeTab === 'activity'" class="content">
-        <div v-if="loadingLogs" class="empty">Lade Aktivitäten...</div>
+        <div class="activity-toolbar">
+          <span class="live-badge" :class="{ active: liveActive }">
+            <span class="live-dot"></span> Live
+          </span>
+          <span class="log-count" v-if="activityLogs.length">{{ activityLogs.length }} Einträge</span>
+        </div>
+        <div v-if="loadingLogs && activityLogs.length === 0" class="empty">Lade Aktivitäten...</div>
         <div v-else-if="activityLogs.length === 0" class="empty">
           <p>Keine Aktivitäten zu diesem Dokument. Diese erscheinen hier beim YouTube-Import und bei der Wiki-Generierung.</p>
         </div>
-        <div v-else class="log-list">
+        <div v-else ref="logContainer" class="log-list">
           <div v-for="log in activityLogs" :key="log.id" class="log-entry" :class="log.status">
             <div class="log-header">
               <span class="log-action-icon">{{ log.action === 'youtube_import' ? '▶️' : '📖' }}</span>
@@ -112,7 +118,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import axios from "axios";
@@ -131,6 +137,8 @@ const activeTab = ref("transcript");
 const activityLogs = ref<any[]>([]);
 const loadingLogs = ref(false);
 const showFullDesc = ref(false);
+let liveRefresh: ReturnType<typeof setInterval> | null = null;
+const liveActive = ref(false);
 
 const youtubeId = computed(() => {
   if (!doc.value?.source_url) return null;
@@ -163,7 +171,32 @@ onMounted(async () => {
     return;
   }
   await Promise.all([loadDoc(), loadWikiPages()]);
+  // Live-Refresh für Aktivitäten
+  watch(activeTab, (tab) => {
+    if (tab === "activity") {
+      loadActivityLog();
+      startLiveRefresh();
+    } else {
+      stopLiveRefresh();
+    }
+  });
 });
+
+onUnmounted(() => stopLiveRefresh());
+
+function startLiveRefresh() {
+  stopLiveRefresh();
+  liveActive.value = true;
+  liveRefresh = setInterval(() => loadActivityLog(true), 2500);
+}
+
+function stopLiveRefresh() {
+  liveActive.value = false;
+  if (liveRefresh) {
+    clearInterval(liveRefresh);
+    liveRefresh = null;
+  }
+}
 
 async function loadDoc() {
   try {
@@ -181,11 +214,14 @@ async function loadWikiPages() {
   } catch (e: any) { console.error("Failed to load wiki pages", e); }
 }
 
-async function loadActivityLog() {
-  loadingLogs.value = true;
+const logContainer = ref<HTMLElement | null>(null);
+
+async function loadActivityLog(silent = false) {
+  if (!silent) loadingLogs.value = true;
   try {
     const res = await axios.get("/api/v1/admin/activity-logs", { params: { document_id: documentId, limit: 20 } });
-    activityLogs.value = res.data.logs || [];
+    const logs = res.data.logs || [];
+    activityLogs.value = logs;
   } catch (e: any) { console.error("Failed to load activity logs", e); }
   finally { loadingLogs.value = false; }
 }
@@ -267,6 +303,13 @@ function formatDateTime(dateStr: string) {
 .btn-lg { padding: .65rem 1.5rem; font-size: .95rem; }
 
 /* Activity Log */
+.activity-toolbar { display: flex; align-items: center; gap: .75rem; margin-bottom: .75rem; }
+.live-badge { display: inline-flex; align-items: center; gap: .4rem; font-size: .75rem; font-weight: 600; color: var(--color-text-secondary); padding: .2rem .6rem; border-radius: 20px; background: var(--color-bg-secondary); }
+.live-badge.active { color: #16a34a; background: #dcfce7; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-secondary); }
+.live-badge.active .live-dot { background: #16a34a; animation: pulse-dot 1.5s ease-in-out infinite; }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.log-count { font-size: .75rem; color: var(--color-text-secondary); }
 .log-list { display: flex; flex-direction: column; gap: .5rem; }
 .log-entry { border: 1px solid var(--color-border); border-radius: 8px; padding: .75rem 1rem; background: white; }
 .log-entry.failed { border-left: 3px solid #ef4444; }
