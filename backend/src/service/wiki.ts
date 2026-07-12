@@ -636,6 +636,9 @@ ${doc.content}`;
       page_type: string;
     }> = [];
 
+    const article1 = parseArticle(rawArticle1, doc.title, 1);
+    const article2 = parseArticle(rawArticle2, doc.title, 2);
+
     if (article1) {
       const slug =
         "vollstaendig-" +
