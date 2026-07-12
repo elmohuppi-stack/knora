@@ -8,6 +8,7 @@ import {
   fetchYouTubeInfo,
   buildDocumentContent,
 } from "../service/youtube.ts";
+import { logActivity, updateLog } from "../service/activity-log.ts";
 
 const documentRouter = new Hono();
 documentRouter.use("*", authMiddleware);
@@ -141,6 +142,7 @@ documentRouter.post(
     const user = c.get("user");
     const { workspace_id, url } = c.req.valid("json");
 
+    const t0 = Date.now();
     console.log(`[doc] ========== YouTube-Import gestartet ==========`);
     console.log(`[doc] URL: ${url}`);
     console.log(`[doc] Workspace: ${workspace_id}`);
@@ -153,23 +155,28 @@ documentRouter.post(
     }
     console.log(`[doc] Video-ID: ${videoId}`);
 
-    const t0 = Date.now();
+    const logId = await logActivity({
+      action: "youtube_import",
+      status: "started",
+      message: `Importiere YouTube-Video: ${url}`,
+      details: { url, videoId },
+      workspace_id,
+      user_id: user.id,
+    });
+
     console.log(`[doc] Rufe YouTube-Info ab (fetchYouTubeInfo)...`);
     const info = await fetchYouTubeInfo(videoId);
-    const fetchElapsed = Date.now() - t0;
-    console.log(`[doc] fetchYouTubeInfo dauerte ${fetchElapsed}ms`);
 
     if (!info) {
       console.log(`[doc] ❌ Konnte keine Video-Informationen abrufen`);
+      await updateLog(logId, { status: "failed", message: "Keine Video-Informationen abrufbar", duration_ms: Date.now() - t0 });
       return c.json({ error: "Could not fetch video information" }, 400);
     }
 
     console.log(`[doc] ✅ Video-Titel: "${info.title}"`);
     console.log(`[doc] ✅ Kanal: ${info.channelName}`);
     console.log(`[doc] ✅ Dauer: ${info.duration}s`);
-    console.log(
-      `[doc] ✅ Transkript: ${info.transcript.length} Zeichen (${info.transcriptLanguage})`,
-    );
+    console.log(`[doc] ✅ Transkript: ${info.transcript.length} Zeichen (${info.transcriptLanguage})`);
 
     const content = buildDocumentContent(info);
     console.log(`[doc] Dokument-Content: ${content.length} Zeichen`);
@@ -186,19 +193,21 @@ documentRouter.post(
     });
     console.log(`[doc] ✅ Dokument erstellt: ${doc.id}`);
 
+    await updateLog(logId, {
+      status: "completed",
+      message: `„${info.title}” importiert (${info.transcript.length} Zeichen)`,
+      details: { title: info.title, channel: info.channelName, transcript_len: info.transcript.length, doc_id: doc.id },
+      duration_ms: Date.now() - t0,
+    });
+
     // Chunking starten (async)
     console.log(`[doc] Starte Chunking für ${doc.id}...`);
     scheduleChunking(doc.id, workspace_id, content);
 
-    // Wiki-Artikel asynchron generieren (mit Delay, damit DB-Connection frei wird)
-    setTimeout(
-      () => scheduleWikiGeneration(doc.id, workspace_id, user.id),
-      500,
-    );
+    // Wiki-Artikel asynchron generieren
+    setTimeout(() => scheduleWikiGeneration(doc.id, workspace_id, user.id), 500);
 
-    console.log(
-      `[doc] ========== YouTube-Import abgeschlossen (${Date.now() - t0}ms) ==========`,
-    );
+    console.log(`[doc] ========== YouTube-Import abgeschlossen (${Date.now() - t0}ms) ==========`);
     return c.json({ document: doc }, 201);
   },
 );
@@ -258,6 +267,17 @@ async function scheduleWikiGeneration(
   workspaceId: string,
   userId: number,
 ) {
+  const t0 = Date.now();
+  const logId = await logActivity({
+    action: "wiki_generate",
+    status: "started",
+    message: `Generiere Wiki-Artikel aus Dokument ${docId.slice(0, 8)}...`,
+    details: { document_id: docId },
+    workspace_id: workspaceId,
+    document_id: docId,
+    user_id: userId,
+  });
+
   console.log(`[doc] ========== scheduleWikiGeneration START ==========`);
   console.log(`[doc] Erstelle Wiki-Artikel für Dokument ${docId}...`);
 
@@ -318,15 +338,32 @@ async function scheduleWikiGeneration(
           );
         }
       }
+
+      await updateLog(logId, {
+        status: "completed",
+        message: `Wiki-Artikel „${wikiResult.title}” erstellt`,
+        details: { title: wikiResult.title, slug, content_len: wikiResult.content.length },
+        duration_ms: Date.now() - t0,
+      });
       console.log(
         `[doc] ✅ Wiki-Artikel "${page.title}" erstellt (slug: ${page.slug})`,
       );
     } else {
+      await updateLog(logId, {
+        status: "failed",
+        message: "Wiki-Generierung ergab kein Ergebnis (kein LLM-Provider?)",
+        duration_ms: Date.now() - t0,
+      });
       console.log(
         `[doc] ⚠️ Wiki-Generierung ergab kein Ergebnis (kein LLM-Provider?)`,
       );
     }
   } catch (e: any) {
+    await updateLog(logId, {
+      status: "failed",
+      message: `Fehler: ${e.message}`,
+      duration_ms: Date.now() - t0,
+    });
     console.warn(`[doc] ❌ Wiki-Generierung fehlgeschlagen:`, e.message);
   }
 

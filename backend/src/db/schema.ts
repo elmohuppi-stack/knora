@@ -198,3 +198,20 @@ export const chatMessages = pgTable("chat_messages", {
   knowledge_refs: jsonb("knowledge_refs").default([]).notNull(),
   created_at: timestamp("created_at").defaultNow().notNull(),
 });
+
+export const activityLogs = pgTable("activity_logs", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  action: varchar("action", { length: 100 }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("started"),
+  message: text("message").notNull().default(""),
+  details: jsonb("details").default({}).notNull(),
+  workspace_id: varchar("workspace_id", { length: 36 }).references(
+    () => workspaces.id,
+  ),
+  document_id: varchar("document_id", { length: 36 }).references(
+    () => documents.id,
+  ),
+  user_id: integer("user_id").references(() => users.id),
+  duration_ms: integer("duration_ms"),
+  created_at: timestamp("created_at").defaultNow().notNull(),
+});

@@ -2,23 +2,43 @@
   <main class="wiki-main">
     <div class="wiki-header" v-if="workspaceId">
       <div class="header-left">
-        <router-link to="/workspaces" class="back-link">← Übersicht</router-link>
+        <router-link to="/workspaces" class="back-link"
+          >← Übersicht</router-link
+        >
         <h3 v-if="ws">{{ ws.name }}</h3>
         <h3 v-else>📖 Wiki</h3>
       </div>
       <div class="header-actions">
         <div class="tab-bar">
-          <router-link :to="'/documents/' + workspaceId" class="tab">📄 Dokumente</router-link>
-          <router-link :to="'/wiki/' + workspaceId" class="tab active">📖 Wiki</router-link>
+          <router-link :to="'/documents/' + workspaceId" class="tab"
+            >📄 Dokumente</router-link
+          >
+          <router-link :to="'/wiki/' + workspaceId" class="tab active"
+            >📖 Wiki</router-link
+          >
         </div>
-        <button class="btn-icon" @click="showSettings = true" title="Workspace-Einstellungen">⚙️</button>
-        <button class="btn-primary" @click="showCreate = true">+ Neue Seite</button>
-        <button class="btn-secondary" @click="showImport = true">📥 Import</button>
+        <button
+          class="btn-icon"
+          @click="showSettings = true"
+          title="Workspace-Einstellungen"
+        >
+          ⚙️
+        </button>
+        <button class="btn-primary" @click="showCreate = true">
+          + Neue Seite
+        </button>
+        <button class="btn-secondary" @click="showImport = true">
+          📥 Import
+        </button>
       </div>
     </div>
     <div class="wiki-header" v-else>
       <h3>📖 Wiki</h3>
-      <select v-model="workspaceId" @change="onWorkspaceSelect" class="ws-select">
+      <select
+        v-model="workspaceId"
+        @change="onWorkspaceSelect"
+        class="ws-select"
+      >
         <option value="">— Workspace wählen —</option>
         <option v-for="w in workspaces" :key="w.id" :value="w.id">
           {{ w.name }}
@@ -194,6 +214,8 @@
         </div>
         <p v-if="importError" class="error">{{ importError }}</p>
       </div>
+    </div>
+
     <!-- Workspace Settings Dialog -->
     <div
       v-if="showSettings && ws"
@@ -228,27 +250,51 @@
           <label>Indexing Strategy</label>
           <div class="indexing-grid">
             <label class="toggle-row">
-              <input type="checkbox" v-model="ws.indexing_strategy.vector_enabled" disabled />
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.vector_enabled"
+                disabled
+              />
               <span>🔍 Vector Search</span>
             </label>
             <label class="toggle-row">
-              <input type="checkbox" v-model="ws.indexing_strategy.keyword_enabled" disabled />
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.keyword_enabled"
+                disabled
+              />
               <span>📄 Keyword Search</span>
             </label>
             <label class="toggle-row">
-              <input type="checkbox" v-model="ws.indexing_strategy.wiki_enabled" disabled />
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.wiki_enabled"
+                disabled
+              />
               <span>📖 Wiki Auto-Generierung</span>
             </label>
             <label class="toggle-row">
-              <input type="checkbox" v-model="ws.indexing_strategy.graph_enabled" disabled />
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.graph_enabled"
+                disabled
+              />
               <span>🕸️ Knowledge Graph</span>
             </label>
           </div>
         </div>
         <div class="dialog-actions">
-          <button class="btn-secondary" @click="showSettings = false">Schließen</button>
+          <button class="btn-secondary" @click="showSettings = false">
+            Schließen
+          </button>
           <button class="btn-primary" @click="updateWs">💾 Speichern</button>
-          <button class="btn-danger" @click="deleteWs" style="margin-left:auto;">🗑️ Löschen</button>
+          <button
+            class="btn-danger"
+            @click="deleteWs"
+            style="margin-left: auto"
+          >
+            🗑️ Löschen
+          </button>
         </div>
         <p v-if="settingsError" class="error">{{ settingsError }}</p>
       </div>
@@ -267,7 +313,7 @@ const router = useRouter();
 const route = useRoute();
 const ws = ref<any>(null);
 const workspaces = ref<any[]>([]);
-const workspaceId = ref(route.params.workspaceId as string || "");
+const workspaceId = ref((route.params.workspaceId as string) || "");
 const pages = ref<any[]>([]);
 const totalPages = ref(0);
 const loading = ref(false);
@@ -336,7 +382,8 @@ async function deleteWs() {
     await axios.delete(`/api/v1/workspaces/${workspaceId.value}`);
     router.push("/workspaces");
   } catch (e: any) {
-    settingsError.value = "Fehler beim Löschen: " + (e.response?.data?.error || e.message);
+    settingsError.value =
+      "Fehler beim Löschen: " + (e.response?.data?.error || e.message);
   }
 }
 
@@ -349,7 +396,7 @@ async function loadWorkspaces() {
 
 function onWorkspaceSelect() {
   if (workspaceId.value) {
-    router.push('/wiki/' + workspaceId.value);
+    router.push("/wiki/" + workspaceId.value);
   }
 }
 
@@ -565,7 +612,7 @@ function closeImport() {
   background: white;
   color: var(--color-text);
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 .tab:hover:not(.active) {
   color: var(--color-text);

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { authMiddleware, requireRole } from "../middleware/auth.ts";
 import * as userService from "../service/user-admin.ts";
+import * as activityLogService from "../service/activity-log.ts";
 
 const adminRouter = new Hono();
 adminRouter.use("*", authMiddleware, requireRole("admin"));
@@ -35,6 +36,24 @@ adminRouter.delete("/users/:id", async (c) => {
   const userId = parseInt(c.req.param("id"));
   await userService.deleteUser(userId);
   return c.json({ success: true });
+});
+
+// Aktivitätslogs abrufen
+adminRouter.get("/activity-logs", async (c) => {
+  const action = c.req.query("action");
+  const status = c.req.query("status");
+  const workspace_id = c.req.query("workspace_id");
+  const limit = parseInt(c.req.query("limit") || "50");
+  const offset = parseInt(c.req.query("offset") || "0");
+
+  const result = await activityLogService.getLogs({
+    action,
+    status,
+    workspace_id,
+    limit,
+    offset,
+  });
+  return c.json(result);
 });
 
 export { adminRouter };

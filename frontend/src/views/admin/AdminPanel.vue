@@ -14,6 +14,12 @@
       >
         🤖 Model-Provider
       </button>
+      <button
+        :class="['tab', { active: tab === 'logs' }]"
+        @click="tab = 'logs'; loadLogs()"
+      >
+        📋 Aktivitäten
+      </button>
     </div>
 
     <!-- User Management -->
@@ -150,6 +156,53 @@
         </div>
       </div>
     </div>
+
+    <!-- Activity Log -->
+    <div v-if="tab === 'logs'" class="content">
+      <div class="section-header">
+        <h3>📋 Aktivitäten</h3>
+        <button class="btn-secondary" @click="loadLogs">🔄 Aktualisieren</button>
+      </div>
+
+      <div class="log-filters">
+        <select v-model="logFilter.action" @change="loadLogs">
+          <option value="">Alle Aktionen</option>
+          <option value="youtube_import">▶️ YouTube-Import</option>
+          <option value="wiki_generate">📖 Wiki-Generierung</option>
+        </select>
+        <select v-model="logFilter.status" @change="loadLogs">
+          <option value="">Alle Status</option>
+          <option value="started">🔄 Gestartet</option>
+          <option value="completed">✅ Erfolgreich</option>
+          <option value="failed">❌ Fehlgeschlagen</option>
+        </select>
+      </div>
+
+      <div v-if="logs.length === 0" class="empty">
+        <p v-if="loadingLogs">Lade Aktivitäten...</p>
+        <p v-else>Noch keine Aktivitäten. Führe einen YouTube-Import oder eine Wiki-Generierung durch.</p>
+      </div>
+
+      <div v-else class="log-list">
+        <div v-for="log in logs" :key="log.id" class="log-entry" :class="log.status">
+          <div class="log-header">
+            <span class="log-action">{{ actionIcon(log.action) }} {{ log.action }}</span>
+            <span class="log-status" :class="log.status">{{ statusLabel(log.status) }}</span>
+            <span class="log-time">{{ formatDateTime(log.created_at) }}</span>
+          </div>
+          <div class="log-message">{{ log.message }}</div>
+          <div class="log-meta" v-if="log.duration_ms">
+            ⏱️ {{ (log.duration_ms / 1000).toFixed(1) }}s
+          </div>
+          <div class="log-details" v-if="log.details && Object.keys(log.details).length">
+            <details>
+              <summary>Details</summary>
+              <pre>{{ JSON.stringify(log.details, null, 2) }}</pre>
+            </details>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -173,6 +226,11 @@ const form = ref({
   api_key: "",
   default_model: "",
 });
+
+// Activity Log
+const logs = ref<any[]>([]);
+const loadingLogs = ref(false);
+const logFilter = ref({ action: "", status: "" });
 
 onMounted(async () => {
   if (!auth.isAuthenticated) {
@@ -270,6 +328,48 @@ function formatDate(dateStr: string) {
     month: "2-digit",
     year: "numeric",
   });
+}
+
+function formatDateTime(dateStr: string) {
+  return new Date(dateStr).toLocaleString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function actionIcon(action: string) {
+  const icons: Record<string, string> = {
+    youtube_import: "▶️",
+    wiki_generate: "📖",
+  };
+  return icons[action] || "🔹";
+}
+
+function statusLabel(status: string) {
+  const map: Record<string, string> = {
+    started: "🔄 Gestartet",
+    completed: "✅ Erfolgreich",
+    failed: "❌ Fehlgeschlagen",
+  };
+  return map[status] || status;
+}
+
+async function loadLogs() {
+  loadingLogs.value = true;
+  try {
+    const params: any = { limit: 50 };
+    if (logFilter.value.action) params.action = logFilter.value.action;
+    if (logFilter.value.status) params.status = logFilter.value.status;
+    const res = await axios.get("/api/v1/admin/activity-logs", { params });
+    logs.value = res.data.logs || [];
+  } catch (e: any) {
+    console.error("Failed to load logs", e);
+  } finally {
+    loadingLogs.value = false;
+  }
 }
 </script>
 
@@ -393,6 +493,93 @@ function formatDate(dateStr: string) {
 .empty {
   color: var(--color-text-secondary);
   padding: 2rem 0;
+}
+
+/* Activity Log */
+.log-filters {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.log-filters select {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.log-entry {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  background: white;
+}
+.log-entry.failed {
+  border-left: 3px solid #ef4444;
+}
+.log-entry.completed {
+  border-left: 3px solid #22c55e;
+}
+.log-entry.started {
+  border-left: 3px solid #f59e0b;
+}
+.log-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+.log-action {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.log-status {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+}
+.log-status.failed {
+  color: #ef4444;
+}
+.log-status.completed {
+  color: #22c55e;
+}
+.log-time {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  margin-left: auto;
+}
+.log-message {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  margin-bottom: 0.2rem;
+}
+.log-meta {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+.log-details {
+  margin-top: 0.3rem;
+}
+.log-details summary {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.log-details pre {
+  font-size: 0.75rem;
+  background: var(--color-bg-secondary);
+  padding: 0.5rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin-top: 0.3rem;
 }
 
 .btn-primary {
