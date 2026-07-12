@@ -571,7 +571,9 @@ ${doc.content}`;
     const fullText = data?.choices?.[0]?.message?.content || "";
     console.log(`[wiki] LLM-Antwort: ${fullText.length} Zeichen`);
     // Ersten 500 Zeichen für Debugging loggen
-    console.log(`[wiki] LLM-Antwort-Preview: ${fullText.slice(0, 500).replace(/\n/g, "\\n")}`);
+    console.log(
+      `[wiki] LLM-Antwort-Preview: ${fullText.slice(0, 500).replace(/\n/g, "\\n")}`,
+    );
 
     if (!fullText) {
       console.warn(`[wiki] ❌ Leere LLM-Antwort`);
@@ -581,7 +583,8 @@ ${doc.content}`;
     // Zwei Artikel parsen (getrennt durch === ARTIKEL 2 oder === ZUSAMMENFASSUNG)
     // Akzeptiere verschiedene Schreibweisen:
     // === ARTIKEL 2 ===, === ARTIKEL 2: ZUSAMMENFASSUNG ===, === ZUSAMMENFASSUNG ===
-    const articleSplitter = /===?\s*(?:ARTIKEL\s*2|ZUSAMMENFASSUNG)\s*:?\s*(?:ZUSAMMENFASSUNG)?\s*===?/i;
+    const articleSplitter =
+      /===?\s*(?:ARTIKEL\s*2|ZUSAMMENFASSUNG)\s*:?\s*(?:ZUSAMMENFASSUNG)?\s*===?/i;
     const parts = fullText.split(articleSplitter);
     const rawArticle1 = parts[0] || "";
     const rawArticle2 = parts[1] || "";
@@ -602,7 +605,10 @@ ${doc.content}`;
 
       // Marker entfernen (=== ARTIKEL 1: VOLLSTAENDIG ===, etc.)
       content = content
-        .replace(/===?\s*ARTIKEL\s*\d\s*:?\s*(VOLLSTAENDIG|ZUSAMMENFASSUNG)?\s*===?/gi, "")
+        .replace(
+          /===?\s*ARTIKEL\s*\d\s*:?\s*(VOLLSTAENDIG|ZUSAMMENFASSUNG)?\s*===?/gi,
+          "",
+        )
         .replace(/===?\s*(VOLLSTAENDIG|ZUSAMMENFASSUNG)\s*===?/gi, "")
         .trim();
 
@@ -616,7 +622,9 @@ ${doc.content}`;
         ? titleMatch[1].trim()
         : `${fallbackTitle} (Teil ${index})`;
 
-      console.log(`[wiki] Artikel ${index} geparst: "${title}" (${content.length} Zeichen, summary=${summary.slice(0, 60)})`);
+      console.log(
+        `[wiki] Artikel ${index} geparst: "${title}" (${content.length} Zeichen, summary=${summary.slice(0, 60)})`,
+      );
       return { summary, title, content };
     }
 

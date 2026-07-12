@@ -2,46 +2,21 @@
   <main class="main-content">
     <div class="header">
       <div class="header-left">
-        <router-link to="/workspaces" class="back-link"
-          >← Übersicht</router-link
-        >
+        <router-link to="/workspaces" class="back-link">← Übersicht</router-link>
         <h3 v-if="ws">{{ ws.name }}</h3>
-        <h3 v-else>📄 Dokumente</h3>
+        <h3 v-else>📄 Übersicht</h3>
       </div>
       <div class="header-actions">
-        <div class="tab-bar">
-          <router-link
-            :to="'/documents/' + (workspaceSlug || workspaceId)"
-            class="tab active"
-            >📄 Dokumente</router-link
-          >
-          <router-link
-            :to="'/wiki/' + (workspaceSlug || workspaceId)"
-            class="tab"
-            >📖 Wiki</router-link
-          >
-        </div>
-        <button
-          class="btn-icon"
-          @click="showSettings = true"
-          title="Workspace-Einstellungen"
-        >
-          ⚙️
-        </button>
-        <button class="btn-primary" @click="showUpload = true">
-          📤 Upload
-        </button>
+        <button class="btn-icon" @click="showSettings = true" title="Workspace-Einstellungen">⚙️</button>
+        <button class="btn-primary" @click="showUpload = true">📤 Upload</button>
         <button class="btn-primary" @click="showUrl = true">🔗 URL</button>
-        <button class="btn-primary" @click="showYoutube = true">
-          ▶️ YouTube
-        </button>
+        <button class="btn-primary" @click="showYoutube = true">▶️ YouTube</button>
       </div>
     </div>
     <div class="header-sub">
-      <router-link to="/settings" class="log-link"
-        >📋 Aktivitätslog</router-link
-      >
+      <router-link to="/settings" class="log-link">📋 Aktivitätslog</router-link>
     </div>
+
 
     <!-- Upload Area -->
     <div v-if="showUpload" class="upload-area">
@@ -121,42 +96,26 @@
           <tr>
             <th>Titel</th>
             <th>Typ</th>
-            <th>Chunks</th>
             <th>Status</th>
-            <th>Hochgeladen</th>
+            <th>Datum</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="doc in docs" :key="doc.id">
-            <td
-              class="doc-title"
-              @click="$router.push(`/documents/${workspaceId}/${doc.id}`)"
-              style="cursor: pointer"
-            >
-              {{ doc.title }}
+          <tr v-for="item in allItems" :key="item._key">
+            <td class="doc-title" @click="openItem(item)" style="cursor:pointer">
+              {{ item.title }}
+              <span class="item-subtitle" v-if="item._type === 'wiki'">aus dem YouTube-Import „{{ item.source_title }}”</span>
             </td>
+            <td><span class="type-badge">{{ item._typeLabel }}</span></td>
             <td>
-              <span class="type-badge">{{ doc.type }}</span>
+              <span v-if="item._type === 'doc'" :class="['status', item.parse_status]">{{ statusLabel(item.parse_status) }}</span>
+              <span v-else-if="item._type === 'wiki'" class="status completed">✅ Veröffentlicht</span>
             </td>
-            <td>{{ doc.chunk_count || "-" }}</td>
+            <td class="date">{{ formatDate(item._date) }}</td>
             <td>
-              <span :class="['status', doc.parse_status]">
-                {{ statusLabel(doc.parse_status) }}
-              </span>
-            </td>
-            <td class="date">{{ formatDate(doc.created_at) }}</td>
-            <td>
-              <button
-                class="btn-icon-sm"
-                @click="generateWithConfirm(doc.id)"
-                title="Wiki-Artikel generieren"
-              >
-                📖
-              </button>
-              <button class="btn-danger-sm" @click="deleteDoc(doc.id)">
-                ✕
-              </button>
+              <button class="btn-icon-sm" v-if="item._type === 'doc'" @click.stop="generateWithConfirm(item.id)" title="Wiki-Artikel generieren">📖</button>
+              <button class="btn-danger-sm" @click.stop="deleteItem(item)">✕</button>
             </td>
           </tr>
         </tbody>
@@ -326,6 +285,7 @@ const workspaceId = ref(rawWorkspaceId);
 const workspaceSlug = ref("");
 
 const docs = ref<any[]>([]);
+const wikiPages = ref<any[]>([]);
 const ws = ref<any>(null);
 const loading = ref(true);
 const showUpload = ref(false);
@@ -352,6 +312,60 @@ const showDetail = ref(false);
 const selectedDoc = ref<any>(null);
 const generatingWiki = ref(false);
 const wikiGenResult = ref("");
+
+// Combined list: documents + wiki pages
+const allItems = computed(() => {
+  const docsList = docs.value.map((d: any) => ({
+    _key: "doc-" + d.id,
+    _type: "doc" as const,
+    _typeLabel: d.type === "youtube" ? "▶️ YouTube" : "📄 " + d.type,
+    _date: d.created_at,
+    id: d.id,
+    title: d.title,
+    parse_status: d.parse_status,
+  }));
+  const wikiList = wikiPages.value.map((w: any) => ({
+    _key: "wiki-" + w.id,
+    _type: "wiki" as const,
+    _typeLabel: w.page_type === "vollstaendig" ? "📖 Wiki (vollst.)" : "📖 Wiki (Zsf.)",
+    _date: w.created_at,
+    id: w.id,
+    title: w.title,
+    slug: w.slug,
+    source_title: docs.value.find((d: any) => d.id === w.source_document_id)?.title || "",
+    page_type: w.page_type,
+  }));
+  return [...docsList, ...wikiList].sort(
+    (a, b) => new Date(b._date).getTime() - new Date(a._date).getTime(),
+  );
+});
+
+function openItem(item: any) {
+  if (item._type === "doc") {
+    router.push(`/documents/${workspaceId.value}/${item.id}`);
+  } else {
+    router.push(`/wiki/${workspaceSlug.value || workspaceId.value}/${encodeURIComponent(item.slug)}`);
+  }
+}
+
+async function deleteItem(item: any) {
+  if (item._type === "doc") {
+    await deleteDoc(item.id);
+  } else {
+    const ok = await askConfirm({
+      title: "Wiki-Seite löschen",
+      message: `Soll die Wiki-Seite „${item.title}” gelöscht werden?`,
+      confirmText: "Löschen",
+    });
+    if (!ok) return;
+    try {
+      await axios.delete(`/api/v1/wiki/${workspaceId.value}/pages/${encodeURIComponent(item.slug)}`);
+      wikiPages.value = wikiPages.value.filter((w: any) => w.id !== item.id);
+    } catch {
+      alert("Fehler beim Löschen");
+    }
+  }
+}
 
 function showDocDetail(doc: any) {
   selectedDoc.value = doc;
@@ -413,8 +427,17 @@ onMounted(async () => {
     workspaceSlug.value = resolved.slug;
   }
 
-  await Promise.all([loadDocs(), loadWorkspace()]);
+  await Promise.all([loadDocs(), loadWikiPages(), loadWorkspace()]);
 });
+
+async function loadWikiPages() {
+  try {
+    const res = await axios.get(`/api/v1/wiki/${workspaceId.value}/pages`, { params: { page_size: 200 } });
+    wikiPages.value = res.data.pages || [];
+  } catch (e: any) {
+    console.error("Failed to load wiki pages", e);
+  }
+}
 
 async function loadWorkspace() {
   try {
@@ -766,6 +789,13 @@ function formatDate(dateStr: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.item-subtitle {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  font-weight: normal;
+  margin-top: 0.15rem;
 }
 .type-badge {
   font-size: 0.75rem;
