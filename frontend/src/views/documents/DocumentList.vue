@@ -1,11 +1,29 @@
 <template>
   <main class="main-content">
     <div class="header">
-      <router-link :to="'/workspaces/' + workspaceId" class="back-link"
-        >← Workspace</router-link
-      >
-      <h3>📄 Dokumente</h3>
+      <div class="header-left">
+        <router-link to="/workspaces" class="back-link"
+          >← Übersicht</router-link
+        >
+        <h3 v-if="ws">{{ ws.name }}</h3>
+        <h3 v-else>📄 Dokumente</h3>
+      </div>
       <div class="header-actions">
+        <div class="tab-bar">
+          <router-link :to="'/documents/' + workspaceId" class="tab active"
+            >📄 Dokumente</router-link
+          >
+          <router-link :to="'/wiki/' + workspaceId" class="tab"
+            >📖 Wiki</router-link
+          >
+        </div>
+        <button
+          class="btn-icon"
+          @click="showSettings = true"
+          title="Workspace-Einstellungen"
+        >
+          ⚙️
+        </button>
         <button class="btn-primary" @click="showUpload = true">
           📤 Upload
         </button>
@@ -122,6 +140,94 @@
         </tbody>
       </table>
     </div>
+
+    <!-- Workspace Settings Dialog -->
+    <div
+      v-if="showSettings && ws"
+      class="dialog-overlay"
+      @click.self="showSettings = false"
+    >
+      <div class="dialog">
+        <h3>⚙️ Workspace: {{ ws.name }}</h3>
+
+        <div class="field">
+          <label>Name</label>
+          <input v-model="editName" />
+        </div>
+        <div class="field">
+          <label>Beschreibung</label>
+          <textarea v-model="editDesc"></textarea>
+        </div>
+
+        <div class="detail-grid">
+          <div class="detail-card">
+            <strong>Chunk Size</strong>
+            <span>{{ ws.chunk_size }} Tokens</span>
+          </div>
+          <div class="detail-card">
+            <strong>Chunk Overlap</strong>
+            <span>{{ ws.chunk_overlap }} Tokens</span>
+          </div>
+          <div class="detail-card">
+            <strong>Erstellt am</strong>
+            <span>{{ formatDate(ws.created_at) }}</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Indexing Strategy</label>
+          <div class="indexing-grid">
+            <label class="toggle-row">
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.vector_enabled"
+                disabled
+              />
+              <span>🔍 Vector Search</span>
+            </label>
+            <label class="toggle-row">
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.keyword_enabled"
+                disabled
+              />
+              <span>📄 Keyword Search</span>
+            </label>
+            <label class="toggle-row">
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.wiki_enabled"
+                disabled
+              />
+              <span>📖 Wiki Auto-Generierung</span>
+            </label>
+            <label class="toggle-row">
+              <input
+                type="checkbox"
+                v-model="ws.indexing_strategy.graph_enabled"
+                disabled
+              />
+              <span>🕸️ Knowledge Graph</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button class="btn-secondary" @click="showSettings = false">
+            Schließen
+          </button>
+          <button class="btn-primary" @click="updateWs">💾 Speichern</button>
+          <button
+            class="btn-danger"
+            @click="deleteWs"
+            style="margin-left: auto"
+          >
+            🗑️ Löschen
+          </button>
+        </div>
+        <p v-if="settingsError" class="error">{{ settingsError }}</p>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -137,6 +243,7 @@ const route = useRoute();
 const workspaceId = route.params.workspaceId as string;
 
 const docs = ref<any[]>([]);
+const ws = ref<any>(null);
 const loading = ref(true);
 const showUpload = ref(false);
 const showUrl = ref(false);
@@ -151,6 +258,12 @@ const youtubeInfo = ref("");
 const urlInput = ref("");
 const youtubeUrl = ref("");
 
+// Workspace settings
+const showSettings = ref(false);
+const editName = ref("");
+const editDesc = ref("");
+const settingsError = ref("");
+
 onMounted(async () => {
   if (!auth.isAuthenticated) {
     router.push("/login");
@@ -160,8 +273,44 @@ onMounted(async () => {
     router.push("/workspaces");
     return;
   }
-  await loadDocs();
+  await Promise.all([loadDocs(), loadWorkspace()]);
 });
+
+async function loadWorkspace() {
+  try {
+    const res = await axios.get(`/api/v1/workspaces/${workspaceId}`);
+    ws.value = res.data.workspace;
+    editName.value = ws.value.name;
+    editDesc.value = ws.value.description || "";
+  } catch (e: any) {
+    console.error("Failed to load workspace", e);
+  }
+}
+
+async function updateWs() {
+  settingsError.value = "";
+  try {
+    const res = await axios.put(`/api/v1/workspaces/${workspaceId}`, {
+      name: editName.value,
+      description: editDesc.value || undefined,
+    });
+    ws.value = res.data.workspace;
+    showSettings.value = false;
+  } catch (e: any) {
+    settingsError.value = e.response?.data?.error || "Fehler beim Speichern";
+  }
+}
+
+async function deleteWs() {
+  if (!confirm(`Workspace "${ws.value?.name}" wirklich löschen?`)) return;
+  try {
+    await axios.delete(`/api/v1/workspaces/${workspaceId}`);
+    router.push("/workspaces");
+  } catch (e: any) {
+    settingsError.value =
+      "Fehler beim Löschen: " + (e.response?.data?.error || e.message);
+  }
+}
 
 async function loadDocs() {
   try {
@@ -276,13 +425,25 @@ function formatDate(dateStr: string) {
   border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
 }
-.header h3 {
-  flex: 1;
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.header-left h3 {
+  font-size: 1.1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .header-actions {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
 }
 .back-link {
@@ -290,6 +451,78 @@ function formatDate(dateStr: string) {
   color: var(--color-primary);
   text-decoration: none;
   white-space: nowrap;
+}
+.btn-icon {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.btn-icon:hover {
+  background: var(--color-bg-secondary);
+}
+.tab-bar {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--color-bg-secondary);
+  border-radius: 8px;
+  padding: 0.2rem;
+}
+.tab {
+  padding: 0.4rem 1rem;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.tab.active {
+  background: white;
+  color: var(--color-text);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.tab:hover:not(.active) {
+  color: var(--color-text);
+}
+
+/* Settings Dialog */
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.detail-card {
+  background: var(--color-bg-secondary);
+  border-radius: 6px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.detail-card strong {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+.detail-card span {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.indexing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.5rem;
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  padding: 0.4rem 0;
 }
 .content {
   padding: 1.5rem;
@@ -402,6 +635,21 @@ function formatDate(dateStr: string) {
   border-radius: 4px;
   font-size: 0.8rem;
   cursor: pointer;
+}
+.btn-danger {
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+  background: #f44336;
+  color: #fff;
+}
+.btn-danger:hover {
+  opacity: 0.9;
 }
 .error {
   color: #d32f2f;

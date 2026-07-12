@@ -20,7 +20,7 @@
           v-for="ws in workspaces"
           :key="ws.id"
           class="ws-card"
-          @click="$router.push('/workspaces/' + ws.id)"
+          @click="$router.push('/documents/' + ws.id)"
         >
           <h4>{{ ws.name }}</h4>
           <p v-if="ws.description" class="ws-desc">{{ ws.description }}</p>
