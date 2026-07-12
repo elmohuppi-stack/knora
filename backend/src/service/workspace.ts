@@ -1,6 +1,17 @@
 import { db } from "../db/index.ts";
 import { workspaces, workspaceMembers } from "../db/schema.ts";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, like, or } from "drizzle-orm";
+
+/** Generiert einen URL-freundlichen Slug aus einem Namen */
+export function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9äöüß\s-]/g, "")
+    .replace(/[\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+}
 
 export async function listWorkspaces(userId: number) {
   const owned = await db
@@ -32,7 +43,7 @@ export async function listWorkspaces(userId: number) {
     return true;
   });
 
-  return unique;
+  return unique.map((w) => ({ ...w, slug: slugify(w.name) }));
 }
 
 export async function getWorkspace(id: string) {
@@ -41,7 +52,14 @@ export async function getWorkspace(id: string) {
     .from(workspaces)
     .where(eq(workspaces.id, id))
     .limit(1);
-  return workspace || null;
+  return workspace ? { ...workspace, slug: slugify(workspace.name) } : null;
+}
+
+/** Findet einen Workspace anhand des generierten Slugs (aus dem Namen) */
+export async function getWorkspaceBySlug(slug: string) {
+  const all = await db.select().from(workspaces);
+  const match = all.find((w) => slugify(w.name) === slug);
+  return match ? { ...match, slug: slugify(match.name) } : null;
 }
 
 export async function createWorkspace(data: {

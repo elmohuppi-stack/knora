@@ -33,6 +33,14 @@ workspaceRouter.get("/", async (c) => {
   return c.json({ workspaces: list });
 });
 
+// Workspace per Slug finden
+workspaceRouter.get("/by-slug/:slug", async (c) => {
+  const slug = c.req.param("slug");
+  const ws = await workspaceService.getWorkspaceBySlug(slug);
+  if (!ws) return c.json({ error: "Workspace not found" }, 404);
+  return c.json({ workspace: ws });
+});
+
 // Einzelnen Workspace abrufen
 workspaceRouter.get("/:id", async (c) => {
   const id = c.req.param("id");

@@ -16,7 +16,10 @@
       </button>
       <button
         :class="['tab', { active: tab === 'logs' }]"
-        @click="tab = 'logs'; loadLogs()"
+        @click="
+          tab = 'logs';
+          loadLogs();
+        "
       >
         📋 Aktivitäten
       </button>
@@ -161,7 +164,9 @@
     <div v-if="tab === 'logs'" class="content">
       <div class="section-header">
         <h3>📋 Aktivitäten</h3>
-        <button class="btn-secondary" @click="loadLogs">🔄 Aktualisieren</button>
+        <button class="btn-secondary" @click="loadLogs">
+          🔄 Aktualisieren
+        </button>
       </div>
 
       <div class="log-filters">
@@ -180,21 +185,36 @@
 
       <div v-if="logs.length === 0" class="empty">
         <p v-if="loadingLogs">Lade Aktivitäten...</p>
-        <p v-else>Noch keine Aktivitäten. Führe einen YouTube-Import oder eine Wiki-Generierung durch.</p>
+        <p v-else>
+          Noch keine Aktivitäten. Führe einen YouTube-Import oder eine
+          Wiki-Generierung durch.
+        </p>
       </div>
 
       <div v-else class="log-list">
-        <div v-for="log in logs" :key="log.id" class="log-entry" :class="log.status">
+        <div
+          v-for="log in logs"
+          :key="log.id"
+          class="log-entry"
+          :class="log.status"
+        >
           <div class="log-header">
-            <span class="log-action">{{ actionIcon(log.action) }} {{ log.action }}</span>
-            <span class="log-status" :class="log.status">{{ statusLabel(log.status) }}</span>
+            <span class="log-action"
+              >{{ actionIcon(log.action) }} {{ log.action }}</span
+            >
+            <span class="log-status" :class="log.status">{{
+              statusLabel(log.status)
+            }}</span>
             <span class="log-time">{{ formatDateTime(log.created_at) }}</span>
           </div>
           <div class="log-message">{{ log.message }}</div>
           <div class="log-meta" v-if="log.duration_ms">
             ⏱️ {{ (log.duration_ms / 1000).toFixed(1) }}s
           </div>
-          <div class="log-details" v-if="log.details && Object.keys(log.details).length">
+          <div
+            class="log-details"
+            v-if="log.details && Object.keys(log.details).length"
+          >
             <details>
               <summary>Details</summary>
               <pre>{{ JSON.stringify(log.details, null, 2) }}</pre>

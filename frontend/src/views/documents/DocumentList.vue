@@ -33,6 +33,9 @@
         </button>
       </div>
     </div>
+    <div class="header-sub">
+      <router-link to="/settings" class="log-link">📋 Aktivitätslog</router-link>
+    </div>
 
     <!-- Upload Area -->
     <div v-if="showUpload" class="upload-area">
@@ -120,7 +123,7 @@
         </thead>
         <tbody>
           <tr v-for="doc in docs" :key="doc.id">
-            <td class="doc-title">{{ doc.title }}</td>
+            <td class="doc-title" @click="showDocDetail(doc)" style="cursor:pointer;">{{ doc.title }}</td>
             <td>
               <span class="type-badge">{{ doc.type }}</span>
             </td>
@@ -139,6 +142,30 @@
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Document Detail Dialog -->
+    <div
+      v-if="showDetail && selectedDoc"
+      class="dialog-overlay"
+      @click.self="showDetail = false"
+    >
+      <div class="dialog dialog-wide">
+        <h3>{{ selectedDoc.title }}</h3>
+        <div class="doc-meta-bar">
+          <span class="type-badge">{{ selectedDoc.type }}</span>
+          <span>Status: {{ statusLabel(selectedDoc.parse_status) }}</span>
+          <span>Chunks: {{ selectedDoc.chunk_count || "-" }}</span>
+          <span>Hochgeladen: {{ formatDate(selectedDoc.created_at) }}</span>
+        </div>
+        <div class="doc-content-box" v-if="selectedDoc.content">
+          <pre>{{ selectedDoc.content }}</pre>
+        </div>
+        <p v-else class="empty">(Kein Inhalt)</p>
+        <div class="dialog-actions">
+          <button class="btn-secondary" @click="showDetail = false">Schließen</button>
+        </div>
+      </div>
     </div>
 
     <!-- Workspace Settings Dialog -->
@@ -263,6 +290,15 @@ const showSettings = ref(false);
 const editName = ref("");
 const editDesc = ref("");
 const settingsError = ref("");
+
+// Document detail
+const showDetail = ref(false);
+const selectedDoc = ref<any>(null);
+
+function showDocDetail(doc: any) {
+  selectedDoc.value = doc;
+  showDetail.value = true;
+}
 
 onMounted(async () => {
   if (!auth.isAuthenticated) {
@@ -446,6 +482,22 @@ function formatDate(dateStr: string) {
   align-items: center;
   gap: 0.5rem;
 }
+.header-sub {
+  padding: 0.25rem 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.log-link {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+.log-link:hover {
+  color: var(--color-primary);
+}
 .back-link {
   font-size: 0.875rem;
   color: var(--color-primary);
@@ -524,6 +576,34 @@ function formatDate(dateStr: string) {
   font-size: 0.875rem;
   padding: 0.4rem 0;
 }
+
+/* Document Detail Dialog */
+.doc-meta-bar {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.doc-content-box {
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.doc-content-box pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  font-family: inherit;
+  margin: 0;
+}
+
 .content {
   padding: 1.5rem;
 }

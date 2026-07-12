@@ -169,14 +169,20 @@ documentRouter.post(
 
     if (!info) {
       console.log(`[doc] ❌ Konnte keine Video-Informationen abrufen`);
-      await updateLog(logId, { status: "failed", message: "Keine Video-Informationen abrufbar", duration_ms: Date.now() - t0 });
+      await updateLog(logId, {
+        status: "failed",
+        message: "Keine Video-Informationen abrufbar",
+        duration_ms: Date.now() - t0,
+      });
       return c.json({ error: "Could not fetch video information" }, 400);
     }
 
     console.log(`[doc] ✅ Video-Titel: "${info.title}"`);
     console.log(`[doc] ✅ Kanal: ${info.channelName}`);
     console.log(`[doc] ✅ Dauer: ${info.duration}s`);
-    console.log(`[doc] ✅ Transkript: ${info.transcript.length} Zeichen (${info.transcriptLanguage})`);
+    console.log(
+      `[doc] ✅ Transkript: ${info.transcript.length} Zeichen (${info.transcriptLanguage})`,
+    );
 
     const content = buildDocumentContent(info);
     console.log(`[doc] Dokument-Content: ${content.length} Zeichen`);
@@ -196,7 +202,12 @@ documentRouter.post(
     await updateLog(logId, {
       status: "completed",
       message: `„${info.title}” importiert (${info.transcript.length} Zeichen)`,
-      details: { title: info.title, channel: info.channelName, transcript_len: info.transcript.length, doc_id: doc.id },
+      details: {
+        title: info.title,
+        channel: info.channelName,
+        transcript_len: info.transcript.length,
+        doc_id: doc.id,
+      },
       duration_ms: Date.now() - t0,
     });
 
@@ -205,9 +216,14 @@ documentRouter.post(
     scheduleChunking(doc.id, workspace_id, content);
 
     // Wiki-Artikel asynchron generieren
-    setTimeout(() => scheduleWikiGeneration(doc.id, workspace_id, user.id), 500);
+    setTimeout(
+      () => scheduleWikiGeneration(doc.id, workspace_id, user.id),
+      500,
+    );
 
-    console.log(`[doc] ========== YouTube-Import abgeschlossen (${Date.now() - t0}ms) ==========`);
+    console.log(
+      `[doc] ========== YouTube-Import abgeschlossen (${Date.now() - t0}ms) ==========`,
+    );
     return c.json({ document: doc }, 201);
   },
 );
@@ -342,7 +358,11 @@ async function scheduleWikiGeneration(
       await updateLog(logId, {
         status: "completed",
         message: `Wiki-Artikel „${wikiResult.title}” erstellt`,
-        details: { title: wikiResult.title, slug, content_len: wikiResult.content.length },
+        details: {
+          title: wikiResult.title,
+          slug,
+          content_len: wikiResult.content.length,
+        },
         duration_ms: Date.now() - t0,
       });
       console.log(
