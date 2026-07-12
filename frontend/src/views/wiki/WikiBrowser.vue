@@ -304,7 +304,7 @@
         </div>
         <p v-if="settingsError" class="error">{{ settingsError }}</p>
       </div>
-    <ConfirmModal :show="confirm.show" :options="confirm.options" :on-confirm="confirm.onConfirm" :on-cancel="confirm.onCancel" />
+    <ConfirmModal :show="showConfirm" :options="confirmOptions" :on-confirm="onConfirm" :on-cancel="onCancel" />
   </main>
 </template>
 
@@ -339,7 +339,7 @@ const showSettings = ref(false);
 const editName = ref("");
 const editDesc = ref("");
 const settingsError = ref("");
-const confirm = useConfirm();
+const { show: showConfirm, options: confirmOptions, ask: askConfirm, onConfirm, onCancel } = useConfirm();
 
 // Import
 const showImport = ref(false);
@@ -400,7 +400,7 @@ async function updateWs() {
 }
 
 async function deleteWs() {
-  const ok = await confirm.confirm({
+  const ok = await askConfirm({
     title: "Workspace löschen",
     message: `Soll der Workspace „${ws.value?.name}” wirklich gelöscht werden? Alle Wiki-Seiten und Dokumente werden entfernt.`,
     confirmText: "Endgültig löschen",

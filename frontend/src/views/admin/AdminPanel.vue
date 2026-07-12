@@ -222,7 +222,7 @@
           </div>
         </div>
       </div>
-    <ConfirmModal :show="confirm.show" :options="confirm.options" :on-confirm="confirm.onConfirm" :on-cancel="confirm.onCancel" />
+    <ConfirmModal :show="showConfirm" :options="confirmOptions" :on-confirm="onConfirm" :on-cancel="onCancel" />
   </main>
 </template>
 
@@ -236,7 +236,7 @@ import axios from "axios";
 
 const auth = useAuthStore();
 const router = useRouter();
-const confirm = useConfirm();
+const { show: showConfirm, options: confirmOptions, ask: askConfirm, onConfirm, onCancel } = useConfirm();
 const tab = ref("users");
 const users = ref<any[]>([]);
 const providers = ref<any[]>([]);
@@ -299,7 +299,7 @@ async function updateRole(u: any) {
 }
 
 async function deleteUser(u: any) {
-  const ok = await confirm.confirm({ title: "Benutzer löschen", message: `Soll der Benutzer „${u.name}” gelöscht werden?`, confirmText: "Löschen" });
+  const ok = await askConfirm({ title: "Benutzer löschen", message: `Soll der Benutzer „${u.name}” gelöscht werden?`, confirmText: "Löschen" });
   if (!ok) return;
   try {
     await axios.delete(`/api/v1/admin/users/${u.id}`);
@@ -337,7 +337,7 @@ async function createProvider() {
 }
 
 async function deleteProvider(id: string) {
-  const ok = await confirm.confirm({
+  const ok = await askConfirm({
     title: "Provider löschen",
     message: "Soll dieser Model-Provider gelöscht werden?",
     confirmText: "Löschen",

@@ -14,13 +14,8 @@ export function useConfirm() {
   const options = ref<ConfirmOptions>({ title: "", message: "" });
   let resolveCallback: ((value: boolean) => void) | null = null;
 
-  function confirm(opts: ConfirmOptions): Promise<boolean> {
-    options.value = {
-      confirmText: "Löschen",
-      cancelText: "Abbrechen",
-      danger: true,
-      ...opts,
-    };
+  function ask(opts: ConfirmOptions): Promise<boolean> {
+    options.value = { confirmText: "Löschen", cancelText: "Abbrechen", danger: true, ...opts };
     show.value = true;
     return new Promise((resolve) => {
       resolveCallback = resolve;
@@ -39,5 +34,5 @@ export function useConfirm() {
     resolveCallback = null;
   }
 
-  return { show, options, confirm, onConfirm, onCancel };
+  return { show, options, ask, onConfirm, onCancel };
 }

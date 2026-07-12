@@ -82,7 +82,7 @@
         </div>
       </div>
     </main>
-    <ConfirmModal :show="confirm.show" :options="confirm.options" :on-confirm="confirm.onConfirm" :on-cancel="confirm.onCancel" />
+    <ConfirmModal :show="showConfirm" :options="confirmOptions" :on-confirm="onConfirm" :on-cancel="onCancel" />
   </div>
 </template>
 
@@ -99,7 +99,7 @@ import DOMPurify from "dompurify";
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const confirm = useConfirm();
+const { show: showConfirm, options: confirmOptions, ask: askConfirm, onConfirm, onCancel } = useConfirm();
 const workspaceId = route.params.workspaceId as string;
 const pageSlug = route.params.slug as string;
 
@@ -167,7 +167,7 @@ async function savePage() {
 }
 
 async function deletePage() {
-  const ok = await confirm.confirm({
+  const ok = await askConfirm({
     title: "Seite löschen",
     message: "Soll diese Wiki-Seite wirklich gelöscht werden?",
     confirmText: "Löschen",

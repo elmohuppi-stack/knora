@@ -270,10 +270,10 @@
       </div>
     </div>
     <ConfirmModal
-      :show="confirm.show"
-      :options="confirm.options"
-      :on-confirm="confirm.onConfirm"
-      :on-cancel="confirm.onCancel"
+      :show="showConfirm"
+      :options="confirmOptions"
+      :on-confirm="onConfirm"
+      :on-cancel="onCancel"
     />
   </main>
 </template>
@@ -291,7 +291,7 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 const { resolveWorkspace, isUUID, resolving } = useWorkspace();
-const confirm = useConfirm();
+const { show: showConfirm, options: confirmOptions, ask: askConfirm, onConfirm, onCancel } = useConfirm();
 
 const rawWorkspaceId = route.params.workspaceId as string;
 const workspaceId = ref(rawWorkspaceId);
@@ -379,7 +379,7 @@ async function updateWs() {
 }
 
 async function deleteWs() {
-  const ok = await confirm.confirm({
+  const ok = await askConfirm({
     title: "Workspace löschen",
     message: `Soll der Workspace „${ws.value?.name}” wirklich gelöscht werden? Alle Dokumente und Wiki-Seiten werden entfernt.`,
     confirmText: "Endgültig löschen",
@@ -469,7 +469,7 @@ async function importYoutube() {
 }
 
 async function deleteDoc(id: string) {
-  const ok = await confirm.confirm({
+  const ok = await askConfirm({
     title: "Dokument löschen",
     message: "Soll dieses Dokument wirklich gelöscht werden?",
     confirmText: "Löschen",

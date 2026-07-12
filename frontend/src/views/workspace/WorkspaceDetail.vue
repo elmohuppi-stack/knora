@@ -117,6 +117,7 @@
         </div>
       </div>
     </div>
+    <ConfirmModal :show="showConfirm" :options="confirmOptions" :on-confirm="onConfirm" :on-cancel="onCancel" />
   </main>
 </template>
 
@@ -130,7 +131,7 @@ import axios from "axios";
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const confirm = useConfirm();
+const { show: showConfirm, options: confirmOptions, ask: askConfirm, onConfirm, onCancel } = useConfirm();
 const ws = ref<any>(null);
 const showEdit = ref(false);
 const editName = ref("");
@@ -171,7 +172,7 @@ async function updateWs() {
 }
 
 async function deleteWs() {
-  const ok = await confirm.confirm({
+  const ok = await askConfirm({
     title: "Workspace löschen",
     message: `Soll der Workspace „${ws.value?.name}” wirklich gelöscht werden?`,
     confirmText: "Endgültig löschen",
