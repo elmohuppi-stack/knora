@@ -467,7 +467,7 @@ export async function generateWikiPage(
   );
   console.log(`[wiki] API-Base: ${provider.api_base_url}`);
 
-  // Wiki-Seiten als Kontext für Verlinkungen
+  // Wiki-Seiten als Kontext für Verlinkungen (nur aus diesem Dokument)
   const existingPages =
     existingSlugs.length > 0
       ? await db
@@ -476,6 +476,7 @@ export async function generateWikiPage(
           .where(
             and(
               eq(wikiPages.workspace_id, workspaceId),
+              eq(wikiPages.source_document_id, documentId),
               inArray(wikiPages.slug, existingSlugs),
             ),
           )
@@ -502,13 +503,11 @@ Diese Metadaten stehen ganz oben im Quelldokument und sind massgeblich.
 - Vollständig, keine Kürzung, kein Weglassen von Argumenten
 - Geschätzte Videolänge: ~${estimatedHours.toFixed(1)}h → angemessene Länge wählen
 - Struktur mit ## Überschriften, die den Gesprächsverlauf abbilden
-- Enthält am Ende einen Verweis auf die Zusammenfassung: [[zusammenfassung-{slug}|Zusammenfassung]]
 
 ## ARTIKEL 2 – Zusammenfassung (Tag: ZUSAMMENFASSUNG)
 - Konzentriert sich auf die 5-10 wichtigsten Thesen und Kernaussagen
 - Maximal 1000-1500 Wörter, unabhängig von der Videolänge
 - Struktur: ## Wichtigste Thesen als Bullet-Points mit kurzer Erklärung
-- Enthält am Ende einen Verweis auf den vollständigen Artikel: [[vollstaendig-{slug}|Vollständiger Inhalt]]
 
 ## FORMAT (genau einhalten – jede Abweichung macht den Artikel unbrauchbar)
 
@@ -639,27 +638,31 @@ ${doc.content}`;
     const article1 = parseArticle(rawArticle1, doc.title, 1);
     const article2 = parseArticle(rawArticle2, doc.title, 2);
 
-    if (article1) {
-      const slug =
-        "vollstaendig-" +
-        article1.title
-          .toLowerCase()
+    // Hilfsfunktion: Slug aus Titel mit Prefix, vermeidet Doppelung
+    function makeSlug(title: string, prefix: string): string {
+      let t = title.toLowerCase().trim();
+      // Prefix aus dem Titel entfernen falls vorhanden
+      t = t.replace(new RegExp(`^${prefix}[\\s:-]+`, "i"), "");
+      t = t.replace(/^vollstaendig[\s:-]+/i, "");
+      t = t.replace(/^zusammenfassung[\s:-]+/i, "");
+      return (
+        prefix +
+        "-" +
+        t
           .replace(/[^a-z0-9äöüß\s-]/g, "")
           .replace(/\s+/g, "-")
           .replace(/-+/g, "-")
-          .slice(0, 80);
+          .slice(0, 80)
+      );
+    }
+
+    if (article1) {
+      const slug = makeSlug(article1.title, "vollstaendig");
 
       // Cross-Link zwischen den Artikeln einfügen
       let content = article1.content;
       if (article2?.title) {
-        const summarySlug =
-          "zusammenfassung-" +
-          article2.title
-            .toLowerCase()
-            .replace(/[^a-z0-9äöüß\s-]/g, "")
-            .replace(/\s+/g, "-")
-            .replace(/-+/g, "-")
-            .slice(0, 80);
+        const summarySlug = makeSlug(article2.title, "zusammenfassung");
         if (!content.includes(`[[${summarySlug}]]`)) {
           content += `\n\n---\n📄 **Zusammenfassung**: [[${summarySlug}|Zusammenfassung dieses Artikels]]`;
         }
@@ -678,14 +681,7 @@ ${doc.content}`;
     }
 
     if (article2) {
-      const slug =
-        "zusammenfassung-" +
-        article2.title
-          .toLowerCase()
-          .replace(/[^a-z0-9äöüß\s-]/g, "")
-          .replace(/\s+/g, "-")
-          .replace(/-+/g, "-")
-          .slice(0, 80);
+      const slug = makeSlug(article2.title, "zusammenfassung");
 
       // Cross-Link zum vollständigen Artikel
       let content = article2.content;
