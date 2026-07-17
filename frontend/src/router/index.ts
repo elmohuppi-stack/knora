@@ -18,18 +18,7 @@ const router = createRouter({
       component: () => import("../views/chat/ChatView.vue"),
       meta: { requiresAuth: true },
     },
-    {
-      path: "/wiki/:workspaceId?",
-      name: "Wiki",
-      component: () => import("../views/wiki/WikiBrowser.vue"),
-      meta: { requiresAuth: true },
-    },
-    {
-      path: "/wiki/:workspaceId/:slug",
-      name: "WikiPage",
-      component: () => import("../views/wiki/WikiPage.vue"),
-      meta: { requiresAuth: true },
-    },
+    // --- Workspace Hub (Tabs: Documents, Wiki, Graph) ---
     {
       path: "/workspaces",
       name: "Workspaces",
@@ -38,22 +27,67 @@ const router = createRouter({
     },
     {
       path: "/workspaces/:id",
-      name: "WorkspaceDetail",
-      component: () => import("../views/workspace/WorkspaceDetail.vue"),
+      component: () => import("../views/workspace/WorkspaceHub.vue"),
       meta: { requiresAuth: true },
+      redirect: (to) => ({ path: `/workspaces/${to.params.id}/documents` }),
+      children: [
+        {
+          path: "documents",
+          name: "WorkspaceDocuments",
+          component: () => import("../views/documents/DocumentList.vue"),
+        },
+        {
+          path: "documents/:documentId",
+          name: "WorkspaceDocumentDetail",
+          component: () => import("../views/documents/DocumentDetail.vue"),
+        },
+        {
+          path: "wiki",
+          name: "WorkspaceWiki",
+          component: () => import("../views/wiki/WikiBrowser.vue"),
+        },
+        {
+          path: "wiki/:slug(.*)",
+          name: "WorkspaceWikiPage",
+          component: () => import("../views/wiki/WikiBrowser.vue"),
+        },
+        {
+          path: "graph",
+          name: "WorkspaceGraph",
+          component: () => import("../views/wiki/WikiBrowser.vue"),
+        },
+        {
+          path: "settings",
+          name: "WorkspaceSettings",
+          component: () => import("../views/workspace/WorkspaceDetail.vue"),
+        },
+      ],
+    },
+    // --- Alte Pfade (Redirects) ---
+    {
+      path: "/wiki/:workspaceId?",
+      redirect: (to) => {
+        if (to.params.workspaceId) {
+          return `/workspaces/${to.params.workspaceId}/wiki`;
+        }
+        return "/workspaces";
+      },
+    },
+    {
+      path: "/wiki/:workspaceId/:slug",
+      redirect: (to) =>
+        `/workspaces/${to.params.workspaceId}/wiki/${to.params.slug}`,
     },
     {
       path: "/documents/:workspaceId",
-      name: "Documents",
-      component: () => import("../views/documents/DocumentList.vue"),
-      meta: { requiresAuth: true },
+      redirect: (to) => `/workspaces/${to.params.workspaceId}/documents`,
     },
     {
       path: "/documents/:workspaceId/:documentId",
-      name: "DocumentDetail",
-      component: () => import("../views/documents/DocumentDetail.vue"),
-      meta: { requiresAuth: true },
+      redirect: (to) =>
+        `/workspaces/${to.params.workspaceId}/documents/${to.params.documentId}`,
     },
+    // --- Einstellungen ---
     {
       path: "/admin",
       redirect: "/settings",
@@ -67,7 +101,7 @@ const router = createRouter({
   ],
 });
 
-// Navigation guard – umgeleitet zu /login wenn nicht authentifiziert
+// Navigation guard
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem("token");
   if (to.meta.requiresAuth && !token) {

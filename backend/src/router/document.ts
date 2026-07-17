@@ -211,14 +211,18 @@ documentRouter.post(
       duration_ms: Date.now() - t0,
     });
 
-    // Chunking starten (async)
+    // Chunking starten (async – entkoppelt vom Request-Kontext)
     console.log(`[doc] Starte Chunking für ${doc.id}...`);
-    scheduleChunking(doc.id, workspace_id, content);
+    setTimeout(() => {
+      scheduleChunking(doc.id, workspace_id, content).catch((e: any) =>
+        console.error(`[doc] Chunking fehlgeschlagen:`, e.message),
+      );
+    }, 100);
 
     // Wiki-Artikel asynchron generieren
     setTimeout(
       () => scheduleWikiGeneration(doc.id, workspace_id, user.id),
-      500,
+      1000,
     );
 
     console.log(
@@ -273,7 +277,9 @@ async function scheduleChunking(
     }
   } catch (e: any) {
     console.error(`[doc] Parse error ${docId}:`, e.message);
-    await documentService.updateDocumentStatus(docId, "failed", e.message);
+    try {
+      await documentService.updateDocumentStatus(docId, "failed", e.message);
+    } catch {}
   }
 }
 
@@ -298,94 +304,33 @@ async function scheduleWikiGeneration(
   console.log(`[doc] Erstelle Wiki-Artikel für Dokument ${docId}...`);
 
   try {
-    const {
-      listPages,
-      generateWikiPage,
-      createPage,
-      resolveLinks,
-      updateIncomingLinks,
-      updatePage,
-    } = await import("../service/wiki.ts");
+    const { generateWikiArticles } =
+      await import("../service/wiki-generate.ts");
 
-    console.log(`[doc] Lade existierende Wiki-Seiten...`);
-    const existing = await listPages(workspaceId, { page_size: 200 });
-    const existingSlugs = existing.pages.map((p: any) => p.slug);
-    console.log(
-      `[doc] ${existing.pages.length} existierende Wiki-Seiten gefunden`,
-    );
+    const result = await generateWikiArticles(docId, workspaceId);
 
-    console.log(`[doc] Rufe LLM zur Wiki-Generierung auf...`);
-    const wikiResults = await generateWikiPage(
-      workspaceId,
-      docId,
-      existingSlugs,
-    );
-
-    if (wikiResults && wikiResults.length > 0) {
-      const createdPages: string[] = [];
-      const allSlugs = [...existingSlugs];
-
-      for (const article of wikiResults) {
-        let slug = article.slug;
-        let counter = 1;
-        while (allSlugs.includes(slug)) {
-          slug = `${article.slug}-${counter}`;
-          counter++;
-        }
-        allSlugs.push(slug);
-
-        console.log(
-          `[doc] Wiki-Seite wird erstellt: slug="${slug}", title="${article.title}"`,
-        );
-        const page = await createPage({
-          workspace_id: workspaceId,
-          slug,
-          title: article.title,
-          content: article.content,
-          summary: article.summary,
-          page_type: article.page_type,
-          source_document_id: docId,
-          created_by: userId,
-        });
-        createdPages.push(page.title);
-
-        const { out_links } = await resolveLinks(workspaceId, article.content);
-        if (out_links.length > 0) {
-          try {
-            await updatePage(workspaceId, slug, { out_links });
-            await updateIncomingLinks(workspaceId, slug, out_links);
-            console.log(
-              `[doc] ${out_links.length} Wiki-Links für "${slug}" aufgelöst`,
-            );
-          } catch (linkErr: any) {
-            console.warn(
-              `[doc] Link-Resolution fehlgeschlagen:`,
-              linkErr.message,
-            );
-          }
-        }
-      }
-
+    if (result) {
       await updateLog(logId, {
         status: "completed",
-        message: `${createdPages.length} Wiki-Seiten erstellt: ${createdPages.join(", ")}`,
+        message: `Wiki-Seiten erstellt: Summary + ${result.entities} Entities + ${result.concepts} Concepts`,
         details: {
-          title: wikiResult.title,
-          slug,
-          content_len: wikiResult.content.length,
+          document_id: docId,
+          summary_id: result.summary?.id,
+          entities: result.entities,
+          concepts: result.concepts,
         },
         duration_ms: Date.now() - t0,
       });
-      console.log(`[doc] ✅ ${createdPages.length} Wiki-Seiten erstellt`);
+      console.log(
+        `[doc] ✅ Wiki-Generierung abgeschlossen: ${result.entities} Entities, ${result.concepts} Concepts`,
+      );
     } else {
       await updateLog(logId, {
         status: "failed",
         message: "Wiki-Generierung ergab kein Ergebnis (kein LLM-Provider?)",
         duration_ms: Date.now() - t0,
       });
-      console.log(
-        `[doc] ⚠️ Wiki-Generierung ergab kein Ergebnis (kein LLM-Provider?)`,
-      );
+      console.log(`[doc] ⚠️ Wiki-Generierung ergab kein Ergebnis`);
     }
   } catch (e: any) {
     await updateLog(logId, {

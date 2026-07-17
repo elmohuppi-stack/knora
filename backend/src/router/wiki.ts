@@ -127,66 +127,38 @@ wikiRouter.delete("/:workspaceId/pages/:slug", async (c) => {
   return c.json({ success: true });
 });
 
-// Wiki-Seite aus Dokument generieren
+// Wiki-Seite aus Dokument generieren (neue Pipeline)
 wikiRouter.post("/:workspaceId/generate/:documentId", async (c) => {
   const workspaceId = c.req.param("workspaceId");
   const documentId = c.req.param("documentId");
 
-  // Existierende Slugs abrufen
-  const existing = await wikiService.listPages(workspaceId, { page_size: 200 });
-  const existingSlugs = existing.pages.map((p) => p.slug);
+  try {
+    const { generateWikiArticles } =
+      await import("../service/wiki-generate.ts");
+    const result = await generateWikiArticles(documentId, workspaceId);
 
-  const result = await wikiService.generateWikiPage(
-    workspaceId,
-    documentId,
-    existingSlugs,
-  );
-  if (!result || result.length === 0) {
+    if (!result) {
+      return c.json(
+        {
+          error:
+            "Generation failed - no chat provider configured or document empty",
+        },
+        400,
+      );
+    }
+
     return c.json(
       {
-        error:
-          "Generation failed - no chat provider configured or document empty",
+        summary: result.summary,
+        entities: result.entities,
+        concepts: result.concepts,
       },
-      400,
+      201,
     );
+  } catch (e: any) {
+    console.error("[wiki] Generation error:", e.message);
+    return c.json({ error: `Generation failed: ${e.message}` }, 500);
   }
-
-  // Alle generierten Artikel anlegen
-  const pages: any[] = [];
-  const allSlugs = [...existingSlugs];
-
-  for (const article of result) {
-    let slug = article.slug;
-    let counter = 1;
-    while (allSlugs.includes(slug)) {
-      slug = `${article.slug}-${counter}`;
-      counter++;
-    }
-    allSlugs.push(slug);
-
-    const page = await wikiService.createPage({
-      workspace_id: workspaceId,
-      slug,
-      title: article.title,
-      content: article.content,
-      summary: article.summary,
-      page_type: article.page_type,
-      source_document_id: documentId,
-    });
-    pages.push(page);
-
-    // Links auflösen
-    const { out_links } = await wikiService.resolveLinks(
-      workspaceId,
-      article.content,
-    );
-    if (out_links.length > 0) {
-      await wikiService.updatePage(workspaceId, slug, { out_links });
-      await wikiService.updateIncomingLinks(workspaceId, slug, out_links);
-    }
-  }
-
-  return c.json({ pages }, 201);
 });
 
 // Wiki-Statistiken
@@ -194,6 +166,54 @@ wikiRouter.get("/:workspaceId/stats", async (c) => {
   const workspaceId = c.req.param("workspaceId");
   const stats = await wikiService.getStats(workspaceId);
   return c.json(stats);
+});
+
+// Strukturierte Index-Ansicht (Intro + getypte Paginierung)
+wikiRouter.get("/:workspaceId/index", async (c) => {
+  const workspaceId = c.req.param("workspaceId");
+  const types = c.req.query("types")?.split(",") || [
+    "summary",
+    "entity",
+    "concept",
+  ];
+  const limit = parseInt(c.req.query("limit") || "50");
+  const cursor = c.req.query("cursor") || "";
+
+  // Index-Seite (Intro) laden
+  const indexPage = await wikiService.getPage(workspaceId, "index");
+
+  // Pro Type die ersten Seiten laden
+  const groups: Record<string, { total: number; pages: any[] }> = {};
+  for (const type of types) {
+    const result = await wikiService.listPages(workspaceId, {
+      page_type: type,
+      page_size: limit,
+      page: 1,
+    });
+    groups[type] = { total: result.total, pages: result.pages };
+  }
+
+  return c.json({
+    intro: indexPage?.summary || "",
+    groups,
+    total_pages: Object.values(groups).reduce((s, g) => s + g.total, 0),
+  });
+});
+
+// Seiten nach Typ (paginierte Liste für Tab-Bar)
+wikiRouter.get("/:workspaceId/pages-by-type", async (c) => {
+  const workspaceId = c.req.param("workspaceId");
+  const type = c.req.query("type") || "";
+  const page = parseInt(c.req.query("page") || "1");
+  const pageSize = parseInt(c.req.query("page_size") || "50");
+
+  const result = await wikiService.listPages(workspaceId, {
+    page_type: type || undefined,
+    page,
+    page_size: pageSize,
+  });
+
+  return c.json(result);
 });
 
 // WeKnora Import – mehrere Wiki-Seiten auf einmal importieren

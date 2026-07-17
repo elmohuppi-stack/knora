@@ -4,7 +4,9 @@
     <!-- Sidebar -->
     <aside class="app-sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-header">
-        <router-link to="/" class="sidebar-logo">🧠 <span class="logo-text">Knora</span></router-link>
+        <router-link to="/" class="sidebar-logo"
+          >🧠 <span class="logo-text">Knora</span></router-link
+        >
         <button
           class="sidebar-toggle"
           @click="sidebarCollapsed = !sidebarCollapsed"
@@ -20,14 +22,10 @@
           <i class="pi pi-comments"></i>
           <span>Chat</span>
         </router-link>
-        <router-link to="/workspaces" class="nav-item">
+        <a href="/workspaces" class="nav-item" @click.prevent="openWorkspaces">
           <i class="pi pi-folder"></i>
           <span>Workspaces</span>
-        </router-link>
-        <router-link to="/wiki" class="nav-item">
-          <i class="pi pi-book"></i>
-          <span>Wiki</span>
-        </router-link>
+        </a>
         <router-link to="/settings" class="nav-item">
           <i class="pi pi-cog"></i>
           <span>Einstellungen</span>
@@ -59,16 +57,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from "vue";
+import { ref, onMounted, watch, computed } from "vue";
 import { useAuthStore } from "./stores/auth";
-import { useRouter } from "vue-router";
+import { useRouter, useRoute } from "vue-router";
 
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 
 const isDark = ref(localStorage.getItem("knora-theme") === "dark");
 const sidebarCollapsed = ref(
   localStorage.getItem("knora-sidebar") === "collapsed",
+);
+
+// Zuletzt aktiven Workspace für Direktsprung merken
+const lastWorkspaceId = ref(localStorage.getItem("knora-last-workspace") || "");
+
+watch(lastWorkspaceId, (v) => {
+  if (v) localStorage.setItem("knora-last-workspace", v);
+  else localStorage.removeItem("knora-last-workspace");
+});
+
+// Wenn wir in einem Workspace-Kontext sind, speichern wir die ID
+watch(
+  () => route.params.id as string,
+  (id) => {
+    if (id) lastWorkspaceId.value = id;
+  },
 );
 
 watch(sidebarCollapsed, (v) => {
@@ -93,6 +108,15 @@ function applyTheme() {
 
 function toggleTheme() {
   isDark.value = !isDark.value;
+}
+
+function openWorkspaces() {
+  const lastId = localStorage.getItem("knora-last-workspace");
+  if (lastId) {
+    router.push(`/workspaces/${lastId}/documents`);
+  } else {
+    router.push("/workspaces");
+  }
 }
 
 function logout() {

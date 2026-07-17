@@ -25,12 +25,6 @@
         </button>
       </div>
     </div>
-    <div class="header-sub">
-      <router-link to="/settings" class="log-link"
-        >📋 Aktivitätslog</router-link
-      >
-    </div>
-
     <!-- Upload Area -->
     <div v-if="showUpload" class="upload-area">
       <input
@@ -115,47 +109,74 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in allItems" :key="item._key">
-            <td
-              class="doc-title"
-              @click="openItem(item)"
-              style="cursor: pointer"
-            >
-              {{ item.title }}
-              <span class="item-subtitle" v-if="item._type === 'wiki'"
-                >aus dem YouTube-Import „{{ item.source_title }}”</span
-              >
+          <tr v-for="doc in docs" :key="doc.id">
+            <td class="doc-title" @click="openDoc(doc)" style="cursor: pointer">
+              {{ doc.title }}
             </td>
             <td>
-              <span class="type-badge">{{ item._typeLabel }}</span>
+              <span class="type-badge">{{ doc.type }}</span>
             </td>
             <td>
-              <span
-                v-if="item._type === 'doc'"
-                :class="['status', item.parse_status]"
-                >{{ statusLabel(item.parse_status) }}</span
-              >
-              <span v-else-if="item._type === 'wiki'" class="status completed"
-                >✅ Veröffentlicht</span
-              >
+              <span :class="['status', doc.parse_status]">{{
+                statusLabel(doc.parse_status)
+              }}</span>
             </td>
-            <td class="date">{{ formatDate(item._date) }}</td>
+            <td class="date">{{ formatDate(doc.created_at) }}</td>
             <td>
               <button
                 class="btn-icon-sm"
-                v-if="item._type === 'doc'"
-                @click.stop="generateWithConfirm(item.id)"
-                title="Wiki-Artikel generieren"
+                @click.stop="openDoc(doc)"
+                title="Öffnen"
               >
-                📖
+                ▶️
               </button>
-              <button class="btn-danger-sm" @click.stop="deleteItem(item)">
+              <button class="btn-danger-sm" @click.stop="deleteDoc(doc.id)">
                 ✕
               </button>
             </td>
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Log-Akkordeon -->
+    <div class="log-accordion">
+      <button class="log-accordion-header" @click="showLogs = !showLogs">
+        <span class="log-accordion-title">
+          📋 Log-Meldungen
+          <span v-if="activities.length > 0" class="log-count">{{
+            activities.length
+          }}</span>
+        </span>
+        <span class="log-accordion-icon">{{ showLogs ? "▼" : "▶" }}</span>
+      </button>
+      <div v-if="showLogs" class="log-accordion-body">
+        <div v-if="activities.length === 0" class="log-empty">
+          Keine aktuellen Log-Meldungen.
+        </div>
+        <div
+          v-for="a in activities"
+          :key="a.id"
+          :class="['log-item', a.status]"
+        >
+          <span class="log-icon">{{
+            a.action === "youtube_import" ? "▶️" : "📖"
+          }}</span>
+          <span class="log-msg">{{ a.message }}</span>
+          <span class="log-status">
+            {{
+              a.status === "completed"
+                ? "✅"
+                : a.status === "failed"
+                  ? "❌"
+                  : "🔄"
+            }}
+          </span>
+          <span v-if="a.duration_ms" class="log-time"
+            >({{ (a.duration_ms / 1000).toFixed(1) }}s)</span
+          >
+        </div>
+      </div>
     </div>
 
     <!-- Document Detail Dialog -->
@@ -296,7 +317,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { useWorkspace } from "../../composables/useWorkspace";
@@ -316,12 +337,10 @@ const {
   onCancel,
 } = useConfirm();
 
-const rawWorkspaceId = route.params.workspaceId as string;
+const rawWorkspaceId = (route.params.id || route.params.workspaceId) as string;
 const workspaceId = ref(rawWorkspaceId);
-const workspaceSlug = ref("");
 
 const docs = ref<any[]>([]);
-const wikiPages = ref<any[]>([]);
 const ws = ref<any>(null);
 const loading = ref(true);
 const showUpload = ref(false);
@@ -343,76 +362,56 @@ const editName = ref("");
 const editDesc = ref("");
 const settingsError = ref("");
 
+// Live activity feed
+const activities = ref<any[]>([]);
+const showLogs = ref(false);
+let activityTimer: ReturnType<typeof setInterval> | null = null;
+
 // Document detail
 const showDetail = ref(false);
 const selectedDoc = ref<any>(null);
 const generatingWiki = ref(false);
 const wikiGenResult = ref("");
 
-// Combined list: documents + wiki pages
-const allItems = computed(() => {
-  const docsList = docs.value.map((d: any) => ({
-    _key: "doc-" + d.id,
-    _type: "doc" as const,
-    _typeLabel: d.type === "youtube" ? "▶️ YouTube" : "📄 " + d.type,
-    _date: d.created_at,
-    id: d.id,
-    title: d.title,
-    parse_status: d.parse_status,
-  }));
-  const wikiList = wikiPages.value.map((w: any) => ({
-    _key: "wiki-" + w.id,
-    _type: "wiki" as const,
-    _typeLabel:
-      w.page_type === "vollstaendig" ? "📖 Wiki (vollst.)" : "📖 Wiki (Zsf.)",
-    _date: w.created_at,
-    id: w.id,
-    title: w.title,
-    slug: w.slug,
-    source_title:
-      docs.value.find((d: any) => d.id === w.source_document_id)?.title || "",
-    page_type: w.page_type,
-  }));
-  return [...docsList, ...wikiList].sort(
-    (a, b) => new Date(b._date).getTime() - new Date(a._date).getTime(),
-  );
-});
-
-function openItem(item: any) {
-  if (item._type === "doc") {
-    router.push(`/documents/${workspaceId.value}/${item.id}`);
-  } else {
-    router.push(
-      `/wiki/${workspaceSlug.value || workspaceId.value}/${encodeURIComponent(item.slug)}`,
-    );
-  }
-}
-
-async function deleteItem(item: any) {
-  if (item._type === "doc") {
-    await deleteDoc(item.id);
-  } else {
-    const ok = await askConfirm({
-      title: "Wiki-Seite löschen",
-      message: `Soll die Wiki-Seite „${item.title}” gelöscht werden?`,
-      confirmText: "Löschen",
-    });
-    if (!ok) return;
+function startActivityPoll() {
+  stopActivityPoll();
+  activityTimer = setInterval(async () => {
     try {
-      await axios.delete(
-        `/api/v1/wiki/${workspaceId.value}/pages/${encodeURIComponent(item.slug)}`,
+      const res = await axios.get("/api/v1/admin/activity-logs", {
+        params: { workspace_id: workspaceId.value, limit: 5 },
+      });
+      const logs = (res.data.logs || []).slice(0, 5);
+      const hasRunning = logs.some(
+        (l: any) => l.status === "started" || l.status === "processing",
       );
-      wikiPages.value = wikiPages.value.filter((w: any) => w.id !== item.id);
+      // Accordion automatisch öffnen bei neuen/aktiven Logs
+      if (logs.length > 0 && hasRunning) {
+        showLogs.value = true;
+      }
+      activities.value = logs;
+      // Auto-refresh docs wenn Aktivitäten laufen
+      if (hasRunning) {
+        await loadDocs();
+      } else {
+        // Nach Abschluss einmalig docs laden und polling beenden
+        await loadDocs();
+        stopActivityPoll();
+      }
     } catch {
-      alert("Fehler beim Löschen");
+      /* ignore */
     }
+  }, 2000);
+}
+
+function stopActivityPoll() {
+  if (activityTimer) {
+    clearInterval(activityTimer);
+    activityTimer = null;
   }
 }
 
-function showDocDetail(doc: any) {
-  selectedDoc.value = doc;
-  showDetail.value = true;
-  wikiGenResult.value = "";
+function openDoc(doc: any) {
+  router.push(`/workspaces/${workspaceId.value}/documents/${doc.id}`);
 }
 
 async function generateWithConfirm(docId: string) {
@@ -466,22 +465,15 @@ onMounted(async () => {
       return;
     }
     workspaceId.value = resolved.id;
-    workspaceSlug.value = resolved.slug;
   }
 
-  await Promise.all([loadDocs(), loadWikiPages(), loadWorkspace()]);
+  await Promise.all([loadDocs(), loadWorkspace()]);
+  startActivityPoll();
 });
 
-async function loadWikiPages() {
-  try {
-    const res = await axios.get(`/api/v1/wiki/${workspaceId.value}/pages`, {
-      params: { page_size: 200 },
-    });
-    wikiPages.value = res.data.pages || [];
-  } catch (e: any) {
-    console.error("Failed to load wiki pages", e);
-  }
-}
+onUnmounted(() => {
+  stopActivityPoll();
+});
 
 async function loadWorkspace() {
   try {
@@ -489,7 +481,6 @@ async function loadWorkspace() {
     ws.value = res.data.workspace;
     editName.value = ws.value.name;
     editDesc.value = ws.value.description || "";
-    workspaceSlug.value = ws.value.slug;
   } catch (e: any) {
     console.error("Failed to load workspace", e);
   }
@@ -551,6 +542,7 @@ async function uploadFile(e: Event) {
     });
     showUpload.value = false;
     await loadDocs();
+    startActivityPoll();
   } catch (e: any) {
     uploadError.value = e.response?.data?.error || e.message;
   } finally {
@@ -569,6 +561,7 @@ async function importUrl() {
     showUrl.value = false;
     urlInput.value = "";
     await loadDocs();
+    startActivityPoll();
   } catch (e: any) {
     urlError.value = e.response?.data?.error || e.message;
   } finally {
@@ -592,6 +585,7 @@ async function importYoutube() {
     showYoutube.value = false;
     youtubeUrl.value = "";
     await loadDocs();
+    startActivityPoll();
   } catch (e: any) {
     youtubeError.value = e.response?.data?.error || e.message;
   } finally {
@@ -680,6 +674,88 @@ function formatDate(dateStr: string) {
 .log-link:hover {
   color: var(--color-primary);
 }
+
+/* Log-Akkordeon */
+.log-accordion {
+  margin: 0.5rem 1.5rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.log-accordion-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  background: var(--color-bg-secondary);
+  border: none;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--color-text);
+  transition: background 0.15s;
+}
+.log-accordion-header:hover {
+  background: var(--color-border);
+}
+.log-accordion-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+.log-count {
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 10px;
+  line-height: 1.3;
+}
+.log-accordion-icon {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+.log-accordion-body {
+  padding: 0.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: var(--color-bg);
+  border-top: 1px solid var(--color-border);
+}
+.log-empty {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  padding: 0.5rem 0;
+  text-align: center;
+}
+.log-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  padding: 0.25rem 0;
+}
+.log-item.failed {
+  color: #e74c3c;
+}
+.log-icon {
+  flex-shrink: 0;
+}
+.log-msg {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.log-time {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
 .back-link {
   font-size: 0.875rem;
   color: var(--color-primary);

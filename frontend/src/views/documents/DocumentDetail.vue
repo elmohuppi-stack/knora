@@ -1,7 +1,9 @@
 <template>
   <main class="main-content">
     <div class="header">
-      <router-link :to="'/documents/' + workspaceId" class="back-link"
+      <router-link
+        :to="'/workspaces/' + workspaceId + '/documents'"
+        class="back-link"
         >← Zurück zur Liste</router-link
       >
       <h3>{{ doc?.title || "Lädt..." }}</h3>
@@ -59,180 +61,68 @@
         </div>
       </div>
 
-      <!-- Tabs -->
-      <div class="tabs-bar">
-        <button
-          :class="['tab', { active: activeTab === 'transcript' }]"
-          @click="activeTab = 'transcript'"
-        >
-          📝 Transkript
-        </button>
-        <button
-          :class="['tab', { active: activeTab === 'wiki' }]"
-          @click="activeTab = 'wiki'"
-        >
-          📖 Wiki-Artikel ({{ wikiPages.length }})
-        </button>
-        <button
-          :class="['tab', { active: activeTab === 'activity' }]"
-          @click="
-            activeTab = 'activity';
-            loadActivityLog();
-          "
-        >
-          📋 Aktivitäten
-        </button>
+      <!-- Metadaten + Transkript -->
+      <div class="meta-grid">
+        <div class="meta-card">
+          <strong>Titel</strong><span>{{ doc.title }}</span>
+        </div>
+        <div class="meta-card">
+          <strong>Typ</strong><span class="type-badge">{{ doc.type }}</span>
+        </div>
+        <div class="meta-card">
+          <strong>Status</strong>
+          <span :class="['status', doc.parse_status]">{{
+            statusLabel(doc.parse_status)
+          }}</span>
+        </div>
+        <div class="meta-card" v-if="doc.source_url">
+          <strong>Quelle</strong>
+          <a :href="doc.source_url" target="_blank"
+            >{{ doc.source_url.slice(0, 50) }}…</a
+          >
+        </div>
+        <div class="meta-card">
+          <strong>Chunks</strong><span>{{ doc.chunk_count || "-" }}</span>
+        </div>
+        <div class="meta-card">
+          <strong>Hochgeladen</strong
+          ><span>{{ formatDate(doc.created_at) }}</span>
+        </div>
       </div>
 
-      <!-- Tab: Transkript -->
-      <div v-if="activeTab === 'transcript'" class="content">
-        <div class="meta-grid">
-          <div class="meta-card">
-            <strong>Titel</strong><span>{{ doc.title }}</span>
-          </div>
-          <div class="meta-card">
-            <strong>Typ</strong><span class="type-badge">{{ doc.type }}</span>
-          </div>
-          <div class="meta-card">
-            <strong>Status</strong
-            ><span :class="['status', doc.parse_status]">{{
-              statusLabel(doc.parse_status)
-            }}</span>
-          </div>
-          <div class="meta-card" v-if="doc.source_url">
-            <strong>Quelle</strong
-            ><a :href="doc.source_url" target="_blank"
-              >{{ doc.source_url.slice(0, 50) }}…</a
-            >
-          </div>
-          <div class="meta-card">
-            <strong>Chunks</strong><span>{{ doc.chunk_count || "-" }}</span>
-          </div>
-          <div class="meta-card">
-            <strong>Hochgeladen</strong
-            ><span>{{ formatDate(doc.created_at) }}</span>
-          </div>
-        </div>
-        <div class="transcript-box" v-if="doc.content">
-          <pre>{{ doc.content }}</pre>
-        </div>
-        <p v-else class="empty">(Kein Inhalt)</p>
+      <div class="transcript-box" v-if="doc.content">
+        <pre>{{ doc.content }}</pre>
       </div>
+      <p v-else class="empty">(Kein Inhalt)</p>
 
-      <!-- Tab: Wiki-Artikel -->
-      <div v-if="activeTab === 'wiki'" class="content">
-        <div v-if="wikiPages.length === 0">
-          <div class="empty">
-            <p>Noch keine Wiki-Artikel zu diesem Dokument.</p>
-          </div>
-          <div style="text-align: center; padding: 1rem">
-            <button
-              class="btn-primary btn-lg"
-              @click="generateWiki"
-              :disabled="generating"
-            >
-              {{
-                generating ? "⏳ Generiere..." : "📖 Wiki-Artikel generieren"
-              }}
-            </button>
-            <p v-if="genResult" class="gen-feedback">{{ genResult }}</p>
-          </div>
-        </div>
-        <div v-else class="wiki-tab-list">
-          <div v-for="wp in wikiPages" :key="wp.id" class="wiki-tab-card">
+      <!-- Verknüpfte Wiki-Artikel -->
+      <div class="wiki-sidebar-box">
+        <h4>📖 Wiki-Artikel</h4>
+        <div v-if="wikiPages.length > 0">
+          <div v-for="wp in wikiPages" :key="wp.id" class="wiki-link-item">
             <router-link
-              :to="'/wiki/' + workspaceId + '/' + encodeURIComponent(wp.slug)"
-              class="wiki-tab-link"
+              :to="
+                '/workspaces/' +
+                workspaceId +
+                '/wiki/' +
+                encodeURIComponent(wp.slug)
+              "
             >
-              <span class="wiki-type-icon">{{
-                wp.page_type === "vollstaendig" ? "📖" : "📄"
-              }}</span>
-              <div>
-                <strong>{{ wp.title }}</strong>
-                <span class="wiki-type-label">{{
-                  wp.page_type === "vollstaendig"
-                    ? "Vollständiger Artikel"
-                    : "Zusammenfassung"
-                }}</span>
-              </div>
-              <span class="wiki-arrow">→</span>
+              {{ wp.title }}
             </router-link>
-          </div>
-          <div style="text-align: center; margin-top: 0.75rem">
-            <button
-              class="btn-secondary"
-              @click="generateWiki"
-              :disabled="generating"
-            >
-              {{ generating ? "⏳ Generiere..." : "🔄 Neu generieren" }}
-            </button>
+            <span class="wiki-type">{{ wp.page_type }}</span>
           </div>
         </div>
-      </div>
-
-      <!-- Tab: Aktivitäten -->
-      <div v-if="activeTab === 'activity'" class="content">
-        <div class="activity-toolbar">
-          <span class="live-badge" :class="{ active: liveActive }">
-            <span class="live-dot"></span> Live
-          </span>
-          <span class="log-count" v-if="activityLogs.length"
-            >{{ activityLogs.length }} Einträge</span
+        <div v-else>
+          <p class="empty">Noch keine Wiki-Artikel zu diesem Dokument.</p>
+          <button
+            class="btn-primary btn-sm"
+            @click="generateWiki"
+            :disabled="generating"
           >
-        </div>
-        <div v-if="loadingLogs && activityLogs.length === 0" class="empty">
-          Lade Aktivitäten...
-        </div>
-        <div v-else-if="activityLogs.length === 0" class="empty">
-          <p>
-            Keine Aktivitäten zu diesem Dokument. Diese erscheinen hier beim
-            YouTube-Import und bei der Wiki-Generierung.
-          </p>
-        </div>
-        <div v-else ref="logContainer" class="log-list">
-          <div
-            v-for="log in activityLogs"
-            :key="log.id"
-            class="log-entry"
-            :class="log.status"
-          >
-            <div class="log-header">
-              <span class="log-action-icon">{{
-                log.action === "youtube_import" ? "▶️" : "📖"
-              }}</span>
-              <span class="log-action">{{
-                log.action === "youtube_import"
-                  ? "YouTube-Import"
-                  : "Wiki-Generierung"
-              }}</span>
-              <span class="log-status-dot" :class="log.status"></span>
-              <span class="log-time">{{ formatDateTime(log.created_at) }}</span>
-            </div>
-            <div class="log-body">
-              <div class="log-message">{{ log.message }}</div>
-              <div class="log-meta-row">
-                <span class="log-status-label" :class="log.status">{{
-                  log.status === "completed"
-                    ? "✅ Erfolgreich"
-                    : log.status === "failed"
-                      ? "❌ Fehlgeschlagen"
-                      : "🔄 Läuft"
-                }}</span>
-                <span v-if="log.duration_ms"
-                  >⏱️ {{ (log.duration_ms / 1000).toFixed(1) }}s</span
-                >
-              </div>
-            </div>
-            <div
-              class="log-details"
-              v-if="log.details && Object.keys(log.details).length"
-            >
-              <details>
-                <summary>Details anzeigen</summary>
-                <pre>{{ JSON.stringify(log.details, null, 2) }}</pre>
-              </details>
-            </div>
-          </div>
+            {{ generating ? "⏳ Generiere..." : "📖 Wiki-Artikel generieren" }}
+          </button>
+          <p v-if="genResult" class="gen-feedback">{{ genResult }}</p>
         </div>
       </div>
     </template>
@@ -240,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import axios from "axios";
@@ -248,19 +138,14 @@ import axios from "axios";
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const workspaceId = route.params.workspaceId as string;
+const workspaceId = (route.params.id || route.params.workspaceId) as string;
 const documentId = route.params.documentId as string;
 
 const doc = ref<any>(null);
 const wikiPages = ref<any[]>([]);
 const generating = ref(false);
 const genResult = ref("");
-const activeTab = ref("transcript");
-const activityLogs = ref<any[]>([]);
-const loadingLogs = ref(false);
 const showFullDesc = ref(false);
-let liveRefresh: ReturnType<typeof setInterval> | null = null;
-const liveActive = ref(false);
 
 const youtubeId = computed(() => {
   if (!doc.value?.source_url) return null;
@@ -293,32 +178,7 @@ onMounted(async () => {
     return;
   }
   await Promise.all([loadDoc(), loadWikiPages()]);
-  // Live-Refresh für Aktivitäten
-  watch(activeTab, (tab) => {
-    if (tab === "activity") {
-      loadActivityLog();
-      startLiveRefresh();
-    } else {
-      stopLiveRefresh();
-    }
-  });
 });
-
-onUnmounted(() => stopLiveRefresh());
-
-function startLiveRefresh() {
-  stopLiveRefresh();
-  liveActive.value = true;
-  liveRefresh = setInterval(() => loadActivityLog(true), 2500);
-}
-
-function stopLiveRefresh() {
-  liveActive.value = false;
-  if (liveRefresh) {
-    clearInterval(liveRefresh);
-    liveRefresh = null;
-  }
-}
 
 async function loadDoc() {
   try {
@@ -337,23 +197,6 @@ async function loadWikiPages() {
     wikiPages.value = res.data.pages || [];
   } catch (e: any) {
     console.error("Failed to load wiki pages", e);
-  }
-}
-
-const logContainer = ref<HTMLElement | null>(null);
-
-async function loadActivityLog(silent = false) {
-  if (!silent) loadingLogs.value = true;
-  try {
-    const res = await axios.get("/api/v1/admin/activity-logs", {
-      params: { document_id: documentId, limit: 20 },
-    });
-    const logs = res.data.logs || [];
-    activityLogs.value = logs;
-  } catch (e: any) {
-    console.error("Failed to load activity logs", e);
-  } finally {
-    loadingLogs.value = false;
   }
 }
 
@@ -392,15 +235,6 @@ function formatDate(dateStr: string) {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-  });
-}
-function formatDateTime(dateStr: string) {
-  return new Date(dateStr).toLocaleString("de-DE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
   });
 }
 </script>

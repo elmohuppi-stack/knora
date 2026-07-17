@@ -1,8 +1,10 @@
 <template>
   <main class="wiki-content">
     <div class="wiki-header">
-      <router-link :to="'/wiki/' + workspaceId" class="back-link"
-        >← Übersicht</router-link
+      <router-link
+        :to="'/workspaces/' + workspaceId + '/wiki'"
+        class="back-link"
+        >← Wiki-Übersicht</router-link
       >
       <h3 v-if="!editing">{{ page?.title || "Lädt..." }}</h3>
       <div class="header-actions" v-if="page">
@@ -15,7 +17,9 @@
 
     <div v-if="!page && !loading" class="wiki-empty">
       <p>Seite nicht gefunden.</p>
-      <router-link :to="'/wiki/' + workspaceId" class="back-link"
+      <router-link
+        :to="'/workspaces/' + workspaceId + '/wiki'"
+        class="back-link"
         >Zurück zur Übersicht</router-link
       >
     </div>
@@ -57,7 +61,7 @@
             <router-link
               v-for="slug in page.out_links"
               :key="slug"
-              :to="`/wiki/${workspaceId}/${encodeURIComponent(slug)}`"
+              :to="`/workspaces/${workspaceId}/wiki/${encodeURIComponent(slug)}`"
               class="link-chip"
               >{{ slug.split("/").pop() }}</router-link
             >
@@ -69,7 +73,7 @@
             <router-link
               v-for="slug in page.in_links"
               :key="slug"
-              :to="`/wiki/${workspaceId}/${encodeURIComponent(slug)}`"
+              :to="`/workspaces/${workspaceId}/wiki/${encodeURIComponent(slug)}`"
               class="link-chip"
               >{{ slug.split("/").pop() }}</router-link
             >
@@ -112,7 +116,7 @@ const {
   onConfirm,
   onCancel,
 } = useConfirm();
-const rawWorkspaceId = route.params.workspaceId as string;
+const rawWorkspaceId = (route.params.id || route.params.workspaceId) as string;
 const workspaceId = ref(rawWorkspaceId);
 const workspaceSlug = ref("");
 const pageSlug = route.params.slug as string;
@@ -131,7 +135,7 @@ const renderedContent = computed(() => {
     /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
     (_: string, slug: string, text?: string) => {
       const label = text || slug.split("/").pop() || slug;
-      return `<a href="/wiki/${workspaceId.value}/${encodeURIComponent(slug)}" class="wiki-link">${label}</a>`;
+      return `<a href="/workspaces/${workspaceId.value}/wiki/${encodeURIComponent(slug)}" class="wiki-link">${label}</a>`;
     },
   );
   const parsed = marked.parse(html, { async: false }) as string;

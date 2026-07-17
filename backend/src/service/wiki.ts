@@ -1,6 +1,74 @@
 import { db } from "../db/index.ts";
-import { wikiPages, documents, modelProviders } from "../db/schema.ts";
+import {
+  wikiPages,
+  documents,
+  chunks,
+  workspaces,
+  modelProviders,
+} from "../db/schema.ts";
 import { eq, and, like, or, desc, sql, inArray } from "drizzle-orm";
+import { splitIntoChunks, saveChunks } from "./document.ts";
+
+// --- Wiki-Chunk-Sync (für Chat-Suche) ---
+
+/**
+ * Synct den Inhalt einer Wiki-Seite in die chunks-Tabelle,
+ * damit sie über RAG / Chat-Suche auffindbar ist.
+ * Wiki-Chunks bekommen document_id = "wiki--<page-id>".
+ */
+export async function syncWikiPageToChunks(
+  workspaceId: string,
+  pageId: string,
+  content: string,
+) {
+  if (!content || content.trim().length === 0) return;
+
+  // 1. Vorhandene Chunks für diese Wiki-Seite löschen
+  await db
+    .delete(chunks)
+    .where(
+      and(
+        eq(chunks.document_id, `wiki--${pageId}`),
+        eq(chunks.workspace_id, workspaceId),
+      ),
+    );
+
+  // 2. Workspace für Chunk-Größe laden
+  const [ws] = await db
+    .select({
+      chunk_size: workspaces.chunk_size,
+      chunk_overlap: workspaces.chunk_overlap,
+    })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+
+  const chunkSize = ws?.chunk_size || 512;
+  const chunkOverlap = ws?.chunk_overlap || 50;
+
+  // 3. Content chucken und speichern
+  const chunkList = splitIntoChunks(content, chunkSize, chunkOverlap);
+  if (chunkList.length > 0) {
+    await saveChunks(`wiki--${pageId}`, workspaceId, chunkList);
+  }
+}
+
+/**
+ * Löscht alle Chunks einer Wiki-Seite.
+ */
+export async function deleteWikiPageChunks(
+  workspaceId: string,
+  pageId: string,
+) {
+  await db
+    .delete(chunks)
+    .where(
+      and(
+        eq(chunks.document_id, `wiki--${pageId}`),
+        eq(chunks.workspace_id, workspaceId),
+      ),
+    );
+}
 
 // --- CRUD ---
 
@@ -89,10 +157,11 @@ export async function createPage(data: {
   source_document_id?: string;
   created_by?: number;
 }) {
+  const id = crypto.randomUUID();
   const [page] = await db
     .insert(wikiPages)
     .values({
-      id: crypto.randomUUID(),
+      id,
       workspace_id: data.workspace_id,
       slug: data.slug,
       title: data.title,
@@ -103,6 +172,12 @@ export async function createPage(data: {
       created_by: data.created_by || null,
     })
     .returning();
+
+  // Wiki-Content in Chunks syncen (für Chat-Suche)
+  if (page.content) {
+    await syncWikiPageToChunks(data.workspace_id, page.id, page.content);
+  }
+
   return page;
 }
 
@@ -134,10 +209,25 @@ export async function updatePage(
       and(eq(wikiPages.workspace_id, workspaceId), eq(wikiPages.slug, slug)),
     )
     .returning();
+
+  // Bei Content-Änderung: Chunks neu syncen
+  if (page && data.content !== undefined) {
+    await syncWikiPageToChunks(workspaceId, page.id, page.content);
+  }
+
   return page || null;
 }
 
 export async function deletePage(workspaceId: string, slug: string) {
+  // Erst die Seite laden (für Chunk-Löschung)
+  const [page] = await db
+    .select({ id: wikiPages.id })
+    .from(wikiPages)
+    .where(
+      and(eq(wikiPages.workspace_id, workspaceId), eq(wikiPages.slug, slug)),
+    )
+    .limit(1);
+
   // Auch eingehende Links bei anderen Seiten entfernen
   await db
     .update(wikiPages)
@@ -157,6 +247,11 @@ export async function deletePage(workspaceId: string, slug: string) {
     .where(
       and(eq(wikiPages.workspace_id, workspaceId), eq(wikiPages.slug, slug)),
     );
+
+  // Wiki-Chunks aufräumen
+  if (page?.id) {
+    await deleteWikiPageChunks(workspaceId, page.id);
+  }
 }
 
 // --- Wiki-Link Resolution ---

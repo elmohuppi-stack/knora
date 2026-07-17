@@ -69,6 +69,7 @@ export const workspaces = pgTable("workspaces", {
     synthesis_model_id: null,
     wiki_language: "de",
     max_pages_per_ingest: 10,
+    extraction_granularity: "standard",
   }),
   created_at: timestamp("created_at").defaultNow().notNull(),
   updated_at: timestamp("updated_at").defaultNow().notNull(),
@@ -123,9 +124,7 @@ export const documents = pgTable("documents", {
 
 export const chunks = pgTable("chunks", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  document_id: varchar("document_id", { length: 36 })
-    .notNull()
-    .references(() => documents.id),
+  document_id: varchar("document_id", { length: 36 }),
   workspace_id: varchar("workspace_id", { length: 36 })
     .notNull()
     .references(() => workspaces.id),
@@ -158,6 +157,7 @@ export const wikiPages = pgTable(
     in_links: jsonb("in_links").default([]).notNull(),
     aliases: jsonb("aliases").default([]).notNull(),
     source_refs: jsonb("source_refs").default([]).notNull(),
+    chunk_refs: jsonb("chunk_refs").default([]).notNull(),
     page_metadata: jsonb("page_metadata").default({}).notNull(),
     version: integer("version").default(1).notNull(),
     created_by: integer("created_by").references(() => users.id),

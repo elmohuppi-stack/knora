@@ -1,6 +1,6 @@
 import { db } from "../db/index.ts";
-import { documents, chunks } from "../db/schema.ts";
-import { eq, desc, and } from "drizzle-orm";
+import { documents, chunks, wikiPages } from "../db/schema.ts";
+import { eq, desc, and, sql } from "drizzle-orm";
 
 export async function listDocuments(workspaceId: string) {
   return await db
@@ -63,6 +63,11 @@ export async function updateDocumentStatus(
 }
 
 export async function deleteDocument(id: string) {
+  // Wiki-Seiten, die auf dieses Dokument verweisen, bereinigen
+  await db
+    .update(wikiPages)
+    .set({ source_document_id: null })
+    .where(eq(wikiPages.source_document_id, id));
   await db.delete(chunks).where(eq(chunks.document_id, id));
   await db.delete(documents).where(eq(documents.id, id));
 }
@@ -74,16 +79,21 @@ export async function saveChunks(
 ) {
   if (chunkData.length === 0) return [];
 
-  const values = chunkData.map((c) => ({
-    id: crypto.randomUUID(),
-    document_id: documentId,
-    workspace_id: workspaceId,
-    content: c.content,
-    chunk_index: c.chunk_index,
-    token_count: c.token_count,
-  }));
-
-  const inserted = await db.insert(chunks).values(values).returning();
+  const inserted = [];
+  for (const c of chunkData) {
+    const [chunk] = await db
+      .insert(chunks)
+      .values({
+        id: crypto.randomUUID(),
+        document_id: documentId,
+        workspace_id: workspaceId,
+        content: c.content,
+        chunk_index: c.chunk_index,
+        token_count: c.token_count,
+      })
+      .returning();
+    inserted.push(chunk);
+  }
   return inserted;
 }
 
@@ -120,4 +130,4 @@ export function splitIntoChunks(
 
   return chunks;
 }
-console.log('[doc] Parsing test...');
+console.log("[doc] Parsing test...");
