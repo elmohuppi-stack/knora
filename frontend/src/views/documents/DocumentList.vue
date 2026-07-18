@@ -377,7 +377,7 @@ function startActivityPoll() {
   stopActivityPoll();
   activityTimer = setInterval(async () => {
     try {
-      const res = await axios.get("/api/v1/admin/activity-logs", {
+      const res = await axios.get("/api/v1/activity", {
         params: { workspace_id: workspaceId.value, limit: 5 },
       });
       const logs = (res.data.logs || []).slice(0, 5);

@@ -50,6 +50,9 @@
         <router-view />
       </main>
     </div>
+
+    <!-- Globale Log-Leiste (dezent, unten, ein-/ausklappbar) -->
+    <ActivityBar />
   </div>
 
   <!-- Login-Seite ohne Layout -->
@@ -60,6 +63,7 @@
 import { ref, onMounted, watch, computed } from "vue";
 import { useAuthStore } from "./stores/auth";
 import { useRouter, useRoute } from "vue-router";
+import ActivityBar from "./components/ActivityBar.vue";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -410,6 +414,8 @@ body {
 .app-content {
   flex: 1;
   overflow-y: auto;
+  /* Platz für die eingeklappte Log-Leiste am unteren Rand */
+  padding-bottom: 2rem;
 }
 
 a {

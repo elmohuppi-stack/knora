@@ -263,7 +263,12 @@ async function scheduleChunking(
       await documentService.saveChunks(docId, workspaceId, chunkList);
     }
 
-    await documentService.updateDocumentStatus(docId, "completed");
+    await documentService.updateDocumentStatus(
+      docId,
+      "completed",
+      undefined,
+      chunkList.length,
+    );
     console.log(`[doc] Parsed ${docId}: ${chunkList.length} chunks`);
 
     // Embedding im Hintergrund starten (nicht-blockierend)

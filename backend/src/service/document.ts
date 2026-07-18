@@ -40,6 +40,7 @@ export async function updateDocumentStatus(
   id: string,
   status: string,
   error?: string,
+  chunkCount?: number,
 ) {
   const updateData: Record<string, any> = {
     parse_status: status,
@@ -50,6 +51,9 @@ export async function updateDocumentStatus(
   }
   if (status === "completed") {
     updateData.processed_at = new Date();
+  }
+  if (chunkCount !== undefined) {
+    updateData.chunk_count = chunkCount;
   }
   if (error) {
     updateData.parse_error = error;
@@ -79,22 +83,18 @@ export async function saveChunks(
 ) {
   if (chunkData.length === 0) return [];
 
-  const inserted = [];
-  for (const c of chunkData) {
-    const [chunk] = await db
-      .insert(chunks)
-      .values({
-        id: crypto.randomUUID(),
-        document_id: documentId,
-        workspace_id: workspaceId,
-        content: c.content,
-        chunk_index: c.chunk_index,
-        token_count: c.token_count,
-      })
-      .returning();
-    inserted.push(chunk);
-  }
-  return inserted;
+  // Bulk-Insert: ein einziger Round-Trip statt N Einzel-Inserts. Verhindert,
+  // dass ein langes Transkript den DB-Pool über viele serielle Queries blockiert.
+  const values = chunkData.map((c) => ({
+    id: crypto.randomUUID(),
+    document_id: documentId,
+    workspace_id: workspaceId,
+    content: c.content,
+    chunk_index: c.chunk_index,
+    token_count: c.token_count,
+  }));
+
+  return await db.insert(chunks).values(values).returning();
 }
 
 // Hilfsfunktion: Text in Chunks teilen
@@ -113,6 +113,11 @@ export function splitIntoChunks(
   let start = 0;
   let index = 0;
 
+  // Sicherstellen, dass der Fortschritt pro Iteration positiv ist. Sonst
+  // (z.B. overlap >= chunkSize, oder am Textende wenn end nicht mehr wächst)
+  // würde start nicht vorankommen → Endlosschleife.
+  const step = Math.max(1, chunkSize - overlap);
+
   while (start < text.length) {
     const end = Math.min(start + chunkSize, text.length);
     const content = text.slice(start, end);
@@ -124,10 +129,12 @@ export function splitIntoChunks(
     });
 
     index++;
-    start = end - overlap;
-    if (start >= text.length) break;
+
+    // Letzter Chunk erreicht das Textende → fertig.
+    if (end >= text.length) break;
+
+    start += step;
   }
 
   return chunks;
 }
-console.log("[doc] Parsing test...");
