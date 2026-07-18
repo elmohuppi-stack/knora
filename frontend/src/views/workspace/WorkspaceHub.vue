@@ -100,12 +100,14 @@ import { ref, onMounted, computed } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { useConfirm } from "../../composables/useConfirm";
+import { useWorkspace } from "../../composables/useWorkspace";
 import ConfirmModal from "../../components/ConfirmModal.vue";
 import axios from "axios";
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
+const { isUUID } = useWorkspace();
 const {
   show: showConfirm,
   options: confirmOptions,
@@ -138,7 +140,12 @@ onMounted(async () => {
 
 async function loadCurrentWorkspace() {
   try {
-    const res = await axios.get(`/api/v1/workspaces/${workspaceId.value}`, {
+    // Der Route-Parameter kann eine UUID oder ein Slug sein (z.B. "politik").
+    // Für Slugs den by-slug-Endpoint nutzen, sonst liefert /:id einen 404.
+    const url = isUUID(workspaceId.value)
+      ? `/api/v1/workspaces/${workspaceId.value}`
+      : `/api/v1/workspaces/by-slug/${workspaceId.value}`;
+    const res = await axios.get(url, {
       headers: { Authorization: `Bearer ${auth.token}` },
     });
     const data = res.data.workspace;
@@ -147,6 +154,8 @@ async function loadCurrentWorkspace() {
     editDesc.value = data.description || "";
     editChunkSize.value = data.chunk_size || 512;
     editChunkOverlap.value = data.chunk_overlap || 50;
+    // Dropdown-Auswahl auf die aufgelöste UUID setzen, damit sie in der Liste matcht.
+    selectedWorkspaceId.value = data.id;
   } catch (e: any) {
     console.error("[hub] Fehler beim Laden des Workspace:", e.message);
   }
@@ -158,7 +167,14 @@ async function loadAllWorkspaces() {
       headers: { Authorization: `Bearer ${auth.token}` },
     });
     allWorkspaces.value = res.data.workspaces || [];
-    selectedWorkspaceId.value = workspaceId.value;
+    // Nur setzen, wenn loadCurrentWorkspace die UUID noch nicht aufgelöst hat.
+    // Bei Slug-URLs matcht workspaceId sonst keinen Listeneintrag (Dropdown bliebe leer).
+    if (!selectedWorkspaceId.value) {
+      const match = allWorkspaces.value.find(
+        (w: any) => w.id === workspaceId.value || w.slug === workspaceId.value,
+      );
+      selectedWorkspaceId.value = match?.id || workspaceId.value;
+    }
   } catch (e: any) {
     console.error("[hub] Fehler beim Laden der Workspace-Liste:", e.message);
   }

@@ -10,6 +10,11 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       PARSER_URL: http://parser:8000/parse
       PORT: 3000
+      # YouTube-Transkript-Provider (Apify/Supadata) – von Hetzner-IPs ist YouTube gesperrt,
+      # daher muss der externe Provider aus der .env in den Container durchgereicht werden.
+      YOUTUBE_TRANSCRIPT_PROVIDER: ${YOUTUBE_TRANSCRIPT_PROVIDER:-}
+      APIFY_API_KEY: ${APIFY_API_KEY:-}
+      SUPADATA_API_KEY: ${SUPADATA_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy

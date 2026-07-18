@@ -1,5 +1,5 @@
 import { db } from "../db/index.ts";
-import { documents, chunks, wikiPages } from "../db/schema.ts";
+import { documents, chunks, wikiPages, activityLogs } from "../db/schema.ts";
 import { eq, desc, and, sql } from "drizzle-orm";
 
 export async function listDocuments(workspaceId: string) {
@@ -72,6 +72,12 @@ export async function deleteDocument(id: string) {
     .update(wikiPages)
     .set({ source_document_id: null })
     .where(eq(wikiPages.source_document_id, id));
+  // Activity-Logs entkoppeln (FK ohne Cascade → sonst Constraint-Fehler beim Löschen).
+  // Log-Historie bleibt erhalten, nur die Dokument-Referenz wird entfernt.
+  await db
+    .update(activityLogs)
+    .set({ document_id: null })
+    .where(eq(activityLogs.document_id, id));
   await db.delete(chunks).where(eq(chunks.document_id, id));
   await db.delete(documents).where(eq(documents.id, id));
 }
