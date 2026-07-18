@@ -3,8 +3,11 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    ports:
-      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    # Kein Host-Port nötig: Das Frontend (nginx) proxied /api/ intern zu app:3000
+    # über das appnet-Netzwerk. Ein Host-Mapping würde mit FRONTEND_PORT kollidieren,
+    # wenn WEB_PORT == FRONTEND_PORT gesetzt ist.
+    # ports:
+    #   - "127.0.0.1:${WEB_PORT:-3000}:3000"
     environment:
       DATABASE_URL: postgresql://${DB_USER:-knora}:${DB_PASSWORD:-changeme}@knora-db:5432/knora
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
