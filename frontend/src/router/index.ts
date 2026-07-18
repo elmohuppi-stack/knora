@@ -96,6 +96,32 @@ const router = createRouter({
   ],
 });
 
+// Nach einem Deploy ändern sich die gehashten Chunk-Dateinamen. Ein offenes
+// Tab hält aber noch das alte Haupt-Bundle, das auf inzwischen gelöschte Chunks
+// verweist – der Lazy-Import schlägt dann mit "Failed to fetch dynamically
+// imported module" fehl. In dem Fall einmalig neu laden, um das aktuelle Bundle
+// zu holen. sessionStorage-Flag verhindert eine Reload-Schleife bei echten Fehlern.
+router.onError((error, to) => {
+  const msg = String(error?.message || error);
+  const isChunkError =
+    /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module/i.test(
+      msg,
+    );
+  if (isChunkError) {
+    const reloadKey = "chunk-reload:" + to.fullPath;
+    if (!sessionStorage.getItem(reloadKey)) {
+      sessionStorage.setItem(reloadKey, "1");
+      window.location.assign(to.fullPath);
+    }
+  }
+});
+
+// Erfolgreiche Navigation: Reload-Flag zurücksetzen, damit ein späterer echter
+// Chunk-Fehler auf demselben Pfad wieder einen Reload auslösen darf.
+router.afterEach((to) => {
+  sessionStorage.removeItem("chunk-reload:" + to.fullPath);
+});
+
 // Navigation guard
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem("token");

@@ -70,43 +70,115 @@ documentRouter.post("/upload/:workspaceId", async (c) => {
     source: fileName,
     file_size: fileSize,
     created_by: user.id,
-    content: null,
   });
 
-  // Text im Request-Kontext lesen (File ist nur hier gültig)
-  let fileContent: string | null = null;
-  try {
-    if (fileType === "txt" || fileType === "md" || fileType === "csv") {
-      fileContent = await file.text();
-    } else {
-      const parserUrl = process.env.PARSER_URL || "http://localhost:8001/parse";
-      const formData = new FormData();
-      formData.append("file", file);
-      try {
-        const resp = await fetch(parserUrl, {
-          method: "POST",
-          body: formData,
-          signal: AbortSignal.timeout(30000),
-        });
-        if (resp.ok) {
-          const result = await resp.json();
-          fileContent = result.content || null;
-        }
-      } catch {
-        fileContent = await file.text();
-      }
-    }
-  } catch (e: any) {
-    console.error(`[doc] Failed to read file ${doc.id}:`, e.message);
-  }
-
-  // Asynchron chunken + status aktualisieren
-  if (fileContent) {
-    scheduleChunking(doc.id, workspaceId, fileContent);
-  }
+  // Datei-Bytes im Request-Kontext lesen (File ist nur hier gültig),
+  // die eigentliche Verarbeitung läuft entkoppelt vom HTTP-Response.
+  const buffer = await file.arrayBuffer();
+  setTimeout(() => {
+    processUploadedFile(
+      doc.id,
+      workspaceId,
+      user.id,
+      fileName,
+      fileType,
+      buffer,
+    ).catch((e: any) =>
+      console.error(`[doc] Upload-Verarbeitung fehlgeschlagen:`, e.message),
+    );
+  }, 100);
 
   return c.json({ document: doc }, 201);
 });
+
+/**
+ * Extrahiert Text aus einer hochgeladenen Datei, speichert ihn und startet
+ * Chunking + Wiki-Generierung. Läuft entkoppelt vom HTTP-Response.
+ */
+async function processUploadedFile(
+  docId: string,
+  workspaceId: string,
+  userId: number,
+  fileName: string,
+  fileType: string,
+  buffer: ArrayBuffer,
+) {
+  const t0 = Date.now();
+  const logId = await logActivity({
+    action: "file_import",
+    status: "started",
+    message: `Verarbeite Datei: ${fileName}`,
+    details: { fileName, fileType },
+    workspace_id: workspaceId,
+    document_id: docId,
+    user_id: userId,
+  });
+
+  try {
+    await documentService.updateDocumentStatus(docId, "processing");
+
+    let text = "";
+    const isPlainText =
+      fileType === "txt" || fileType === "md" || fileType === "csv";
+
+    if (isPlainText) {
+      text = new TextDecoder().decode(buffer);
+    } else {
+      // PDF, DOCX, HTML: Parser-Microservice (MarkItDown) verwenden
+      const parserUrl = process.env.PARSER_URL || "http://localhost:8001/parse";
+      const formData = new FormData();
+      formData.append(
+        "file",
+        new Blob([buffer]),
+        fileName,
+      );
+      const resp = await fetch(parserUrl, {
+        method: "POST",
+        body: formData,
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!resp.ok) {
+        throw new Error(
+          `Parser nicht erreichbar (HTTP ${resp.status}) – .${fileType} kann nicht ohne Parser-Service gelesen werden`,
+        );
+      }
+      const result = await resp.json();
+      // HTML-Fallback: falls Parser nichts liefert, eigene Extraktion
+      text = result.content || "";
+      if ((!text || text.trim().length === 0) && fileType === "html") {
+        text = htmlToText(new TextDecoder().decode(buffer));
+      }
+    }
+
+    if (!text || text.trim().length === 0) {
+      throw new Error("Kein Textinhalt aus der Datei extrahierbar");
+    }
+
+    // Content speichern (Wiki-Generierung liest doc.content) + chunken
+    await documentService.updateDocumentContent(docId, text);
+    await scheduleChunking(docId, workspaceId, text);
+
+    await updateLog(logId, {
+      status: "completed",
+      message: `„${fileName}” verarbeitet (${text.length} Zeichen)`,
+      details: { fileName, chars: text.length, doc_id: docId },
+      duration_ms: Date.now() - t0,
+    });
+
+    // Wiki-Artikel asynchron generieren
+    setTimeout(() => scheduleWikiGeneration(docId, workspaceId, userId), 1000);
+  } catch (e: any) {
+    console.error(`[doc] Datei-Verarbeitung fehlgeschlagen ${docId}:`, e.message);
+    try {
+      await documentService.updateDocumentStatus(docId, "failed", e.message);
+    } catch {}
+    await updateLog(logId, {
+      status: "failed",
+      message: `Fehler: ${e.message}`,
+      duration_ms: Date.now() - t0,
+    });
+  }
+}
 
 // URL importieren
 documentRouter.post("/import-url", zValidator("json", urlSchema), async (c) => {
@@ -123,8 +195,12 @@ documentRouter.post("/import-url", zValidator("json", urlSchema), async (c) => {
     created_by: user.id,
   });
 
-  // Asynchron URL laden
-  fetchAndParseUrl(doc.id, url);
+  // Asynchron URL laden (entkoppelt vom Request-Kontext)
+  setTimeout(() => {
+    fetchAndParseUrl(doc.id, url, workspace_id, user.id).catch((e: any) =>
+      console.error(`[doc] URL-Import fehlgeschlagen:`, e.message),
+    );
+  }, 100);
 
   return c.json({ document: doc }, 201);
 });
@@ -349,39 +425,137 @@ async function scheduleWikiGeneration(
   console.log(`[doc] ========== scheduleWikiGeneration ENDE ==========`);
 }
 
-async function fetchAndParseUrl(docId: string, url: string) {
-  // Für TXT und MD: Direkt als Text lesen
-  if (fileType === "txt" || fileType === "md" || fileType === "csv") {
-    return await file.text();
-  }
+/**
+ * Lädt eine Webseite, extrahiert den Textinhalt, speichert ihn und startet
+ * Chunking + Wiki-Generierung. Läuft entkoppelt vom HTTP-Response (fire-and-forget).
+ */
+async function fetchAndParseUrl(
+  docId: string,
+  url: string,
+  workspaceId: string,
+  userId: number,
+) {
+  const t0 = Date.now();
+  const logId = await logActivity({
+    action: "url_import",
+    status: "started",
+    message: `Importiere URL: ${url}`,
+    details: { url },
+    workspace_id: workspaceId,
+    document_id: docId,
+    user_id: userId,
+  });
 
-  // Für PDF, DOCX, HTML: Parser-Microservice verwenden
-  const parserUrl = process.env.PARSER_URL || "http://localhost:8001/parse";
   try {
-    const formData = new FormData();
-    formData.append("file", file);
+    await documentService.updateDocumentStatus(docId, "processing");
 
-    const response = await fetch(parserUrl, {
-      method: "POST",
-      body: formData,
+    // Webseite mit Browser-ähnlichen Headern laden (reduziert 403-Rejections)
+    const resp = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+      },
+      redirect: "follow",
       signal: AbortSignal.timeout(30000),
     });
-
-    if (!response.ok) {
-      throw new Error(`Parser returned ${response.status}`);
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status} beim Laden der URL`);
     }
+    const html = await resp.text();
 
-    const result = await response.json();
-    return result.content || "";
-  } catch (e: any) {
-    console.error(`[parser] Error parsing ${file.name}:`, e.message);
-    // Fallback: Bei Fehler trotzdem Rohtext versuchen
+    // Bevorzugt: Parser-Microservice (MarkItDown → sauberes Markdown)
+    let text = "";
+    const parserUrl = process.env.PARSER_URL || "http://localhost:8001/parse";
     try {
-      return await file.text();
-    } catch {
-      throw new Error(`Failed to parse ${fileType} file: ${e.message}`);
+      const formData = new FormData();
+      formData.append(
+        "file",
+        new Blob([html], { type: "text/html" }),
+        "page.html",
+      );
+      const parserResp = await fetch(parserUrl, {
+        method: "POST",
+        body: formData,
+        signal: AbortSignal.timeout(30000),
+      });
+      if (parserResp.ok) {
+        const result = await parserResp.json();
+        text = result.content || "";
+      }
+    } catch (e: any) {
+      console.warn(`[doc] Parser für URL nicht erreichbar:`, e.message);
     }
+
+    // Fallback: eigene HTML→Text-Extraktion (kein Parser nötig)
+    if (!text || text.trim().length === 0) {
+      text = htmlToText(html);
+    }
+
+    if (!text || text.trim().length === 0) {
+      throw new Error("Kein Textinhalt aus der URL extrahierbar");
+    }
+
+    // Content speichern (Wiki-Generierung liest doc.content) + chunken
+    await documentService.updateDocumentContent(docId, text);
+    await scheduleChunking(docId, workspaceId, text);
+
+    await updateLog(logId, {
+      status: "completed",
+      message: `URL importiert (${text.length} Zeichen)`,
+      details: { url, chars: text.length, doc_id: docId },
+      duration_ms: Date.now() - t0,
+    });
+
+    // Wiki-Artikel asynchron generieren
+    setTimeout(() => scheduleWikiGeneration(docId, workspaceId, userId), 1000);
+  } catch (e: any) {
+    console.error(`[doc] URL-Import fehlgeschlagen ${docId}:`, e.message);
+    try {
+      await documentService.updateDocumentStatus(docId, "failed", e.message);
+    } catch {}
+    await updateLog(logId, {
+      status: "failed",
+      message: `Fehler: ${e.message}`,
+      duration_ms: Date.now() - t0,
+    });
   }
+}
+
+/** Extrahiert sauberen Text aus HTML: entfernt Skripte/Styles/Navigation. */
+function htmlToText(html: string): string {
+  const text = html
+    // Nicht-inhaltliche Blöcke komplett entfernen
+    .replace(
+      /<(script|style|nav|footer|header|iframe|noscript|svg)\b[^>]*>[\s\S]*?<\/\1>/gi,
+      " ",
+    )
+    // Kommentare entfernen
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    // Blockelemente in Zeilenumbrüche wandeln
+    .replace(/<\/(p|div|li|h[1-6]|tr|br)\s*>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    // Restliche Tags strippen
+    .replace(/<[^>]+>/g, " ")
+    // Numerische HTML-Entities dekodieren (&#8211; usw.)
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    // Benannte HTML-Entities (häufigste)
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+  // Whitespace normalisieren: Leerzeilen zusammenfassen
+  return text
+    .split("\n")
+    .map((l) => l.replace(/[ \t]+/g, " ").trim())
+    .filter((l) => l !== "")
+    .join("\n");
 }
 
 export { documentRouter };

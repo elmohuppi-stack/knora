@@ -66,6 +66,15 @@ export async function updateDocumentStatus(
   return doc || null;
 }
 
+export async function updateDocumentContent(id: string, content: string) {
+  const [doc] = await db
+    .update(documents)
+    .set({ content, updated_at: new Date() })
+    .where(eq(documents.id, id))
+    .returning();
+  return doc || null;
+}
+
 export async function deleteDocument(id: string) {
   // Wiki-Seiten, die auf dieses Dokument verweisen, bereinigen
   await db

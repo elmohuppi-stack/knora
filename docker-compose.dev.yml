@@ -20,7 +20,6 @@ services:
 
   parser:
     build: ./parser
-    profiles: ["parser"]
     ports:
       - "8001:8000"
     volumes:
