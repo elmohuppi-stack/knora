@@ -101,28 +101,40 @@ export async function embedChunk(chunkId: string, content: string) {
   }
 }
 
-// Alle unembedded Chunks eines Workspace verarbeiten
+// Alle unembedded Chunks eines Workspace verarbeiten.
+// In Batches bis alles embedded ist (nicht nur die ersten 50) – sonst bleiben
+// z.B. die bei der Wiki-Generierung erzeugten Chunks dauerhaft ohne Embedding
+// und tauchen nie in der Vektorsuche auf.
 export async function embedWorkspaceChunks(workspaceId: string) {
-  const unembedded = await db
-    .select({ id: chunks.id, content: chunks.content })
-    .from(chunks)
-    .where(and(eq(chunks.workspace_id, workspaceId), isNull(chunks.embedding)))
-    .limit(50);
+  let processed = 0;
+  let total = 0;
 
-  if (unembedded.length === 0) return { processed: 0 };
+  for (let batch = 0; batch < 100; batch++) {
+    const unembedded = await db
+      .select({ id: chunks.id, content: chunks.content })
+      .from(chunks)
+      .where(
+        and(eq(chunks.workspace_id, workspaceId), isNull(chunks.embedding)),
+      )
+      .limit(50);
 
-  let successCount = 0;
-  for (const chunk of unembedded) {
-    const ok = await embedChunk(chunk.id, chunk.content);
-    if (ok) successCount++;
-    // Kleine Verzögerung um Rate-Limits zu vermeiden
-    await new Promise((r) => setTimeout(r, 200));
+    if (unembedded.length === 0) break;
+
+    for (const chunk of unembedded) {
+      total++;
+      const ok = await embedChunk(chunk.id, chunk.content);
+      if (ok) processed++;
+      // Kleine Verzögerung um Rate-Limits zu vermeiden
+      await new Promise((r) => setTimeout(r, 200));
+    }
   }
 
-  console.log(
-    `[embed] Embedded ${successCount}/${unembedded.length} chunks in workspace ${workspaceId}`,
-  );
-  return { processed: successCount, total: unembedded.length };
+  if (total > 0) {
+    console.log(
+      `[embed] Embedded ${processed}/${total} chunks in workspace ${workspaceId}`,
+    );
+  }
+  return { processed, total };
 }
 
 // Chunk-Content kürzen auf max Token

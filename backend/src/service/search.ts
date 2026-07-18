@@ -1,6 +1,6 @@
 import { db } from "../db/index.ts";
 import { chunks, documents, modelProviders } from "../db/schema.ts";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 
 export interface SearchResult {
   chunk_id: string;
@@ -52,29 +52,25 @@ async function vectorSearch(
     const vector = await generateQueryEmbedding(query);
     if (!vector) return [];
 
-    // pgvector cosine similarity Abfrage
+    // pgvector cosine similarity Abfrage.
+    // sql-Template statt Positions-Parametern ($1, $2), das der
+    // node-postgres-Treiber hier nicht bindet ("there is no parameter $1").
     const vectorStr = `[${vector.join(",")}]`;
-    const rows = await db.execute<{
-      chunk_id: string;
-      document_id: string;
-      document_title: string;
-      content: string;
-      score: number;
-    }>(
-      `SELECT 
+    const result = await db.execute(sql`
+      SELECT
         c.id as chunk_id,
         c.document_id,
-        COALESCE(d.title, 'Unknown') as document_title,
+        COALESCE(d.title, w.title, 'Wiki') as document_title,
         c.content,
-        1 - (c.embedding <=> $1::vector) as score
+        1 - (c.embedding <=> ${vectorStr}::vector) as score
       FROM chunks c
       LEFT JOIN documents d ON c.document_id = d.id
-      WHERE c.workspace_id = $2
+      LEFT JOIN wiki_pages w ON c.document_id = 'wiki--' || w.id
+      WHERE c.workspace_id = ${workspaceId}
         AND c.embedding IS NOT NULL
-      ORDER BY c.embedding <=> $1::vector
-      LIMIT $3`,
-      [vectorStr, workspaceId, topK],
-    );
+      ORDER BY c.embedding <=> ${vectorStr}::vector
+      LIMIT ${topK}`);
+    const rows = ((result as any).rows ?? result) as any[];
 
     return rows.map((r: any) => ({
       chunk_id: r.chunk_id,
@@ -97,35 +93,31 @@ async function keywordSearch(
   topK: number,
 ): Promise<SearchResult[]> {
   try {
+    // OR-Verknüpfung (|) statt AND (&): eine natürliche Frage hat selten ALLE
+    // Wörter im selben Chunk – ts_rank sortiert die besten Treffer nach oben.
     const searchTerms = query
-      .replace(/[^\w\s]/g, " ")
+      .replace(/[^\wäöüßÄÖÜ\s]/g, " ")
       .split(/\s+/)
       .filter((w) => w.length > 1)
-      .join(" & ");
+      .join(" | ");
 
     if (!searchTerms) return [];
 
-    const rows = await db.execute<{
-      chunk_id: string;
-      document_id: string;
-      document_title: string;
-      content: string;
-      score: number;
-    }>(
-      `SELECT 
+    const result = await db.execute(sql`
+      SELECT
         c.id as chunk_id,
         c.document_id,
-        COALESCE(d.title, 'Unknown') as document_title,
+        COALESCE(d.title, w.title, 'Wiki') as document_title,
         c.content,
-        ts_rank(to_tsvector('german', c.content), to_tsquery('german', $1)) as score
+        ts_rank(to_tsvector('german', c.content), to_tsquery('german', ${searchTerms})) as score
       FROM chunks c
       LEFT JOIN documents d ON c.document_id = d.id
-      WHERE c.workspace_id = $2
-        AND to_tsvector('german', c.content) @@ to_tsquery('german', $1)
+      LEFT JOIN wiki_pages w ON c.document_id = 'wiki--' || w.id
+      WHERE c.workspace_id = ${workspaceId}
+        AND to_tsvector('german', c.content) @@ to_tsquery('german', ${searchTerms})
       ORDER BY score DESC
-      LIMIT $3`,
-      [searchTerms, workspaceId, topK],
-    );
+      LIMIT ${topK}`);
+    const rows = ((result as any).rows ?? result) as any[];
 
     return rows.map((r: any) => ({
       chunk_id: r.chunk_id,
