@@ -56,11 +56,6 @@ const router = createRouter({
           name: "WorkspaceGraph",
           component: () => import("../views/wiki/WikiBrowser.vue"),
         },
-        {
-          path: "settings",
-          name: "WorkspaceSettings",
-          component: () => import("../views/workspace/WorkspaceDetail.vue"),
-        },
       ],
     },
     // --- Alte Pfade (Redirects) ---

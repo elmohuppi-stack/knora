@@ -15,16 +15,16 @@ Stell Fragen via RAG-Chat **und** bekomme ein automatisch generiertes, verlinkte
 
 | Feature                 | Beschreibung                                         |
 | ----------------------- | ---------------------------------------------------- |
-| **📄 Dokument-Import**  | Markdown, Plain Text, später PDF, DOCX, HTML, Bilder |
-| **🔍 Hybride Suche**    | Vektor-Embeddings (pgvector) + Volltext (tsvector)   |
-| **💬 RAG Chat**         | Frage zu deinen Dokumenten mit Quellenangaben        |
-| **📖 Wiki-Generierung** | LLM erstellt automatisch Wiki-Seiten aus Dokumenten  |
-| **🔗 Verlinktes Wiki**  | `[[Slug]]`-Links zwischen Wiki-Seiten                |
-| **✏️ TipTap-Editor**    | WYSIWYG-Editor mit `[[slug]]`-Autocompletion         |
-| **🕸️ Wiki-Graph**       | D3.js Force-Directed Graph der Verlinkungen          |
-| **🎥 YouTube-Import**   | Transkript → automatische Wiki-Seite                 |
-| **📥 WeKnora-Import**   | Exportierte Wiki-Seiten verlustfrei importieren      |
-| **🔐 Auth**             | JWT + bcrypt, Rollen: Admin / Editor / Viewer        |
+| **📄 Dokument-Import**   | Markdown, Text, PDF, DOCX, HTML u.a. über den Parser-Service |
+| **🔍 Hybride Suche**     | Vektor-Embeddings (pgvector) + Volltext (tsvector)   |
+| **💬 RAG Chat**          | Frage zu deinen Dokumenten mit Quellenangaben, SSE-Streaming, Historie |
+| **📖 Wiki-Generierung**  | LLM erstellt Summary-/Entity-/Concept-Seiten aus Dokumenten |
+| **🔗 Verlinktes Wiki**   | `[[Slug]]`-Links zwischen Wiki-Seiten                |
+| **✏️ TipTap-Editor**     | WYSIWYG-Editor mit `[[slug]]`-Autocompletion         |
+| **🕸️ Wiki-Graph**        | D3.js Force-Directed Graph der Verlinkungen          |
+| **🎥 YouTube-Import**    | Transkript → automatische Wiki-Seite                 |
+| **📥 WeKnora-Migration** | Dokumente, generierte Artikel & Embeddings 1:1 übernehmen |
+| **🔐 Auth**              | JWT + bcrypt, Rollen: Admin / Editor / Viewer        |
 
 ---
 
@@ -35,7 +35,7 @@ Stell Fragen via RAG-Chat **und** bekomme ein automatisch generiertes, verlinkte
 | **Backend**      | [Bun](https://bun.sh) + [Hono](https://hono.dev)                                            |
 | **API**          | REST + [`@hono/zod-validator`](https://hono.dev/docs/guides/validation)                     |
 | **Frontend**     | [Vue 3](https://vuejs.org) + [Vite](https://vitejs.dev) + TypeScript                        |
-| **UI-Library**   | _wird installiert_ (PrimeVue / Shadcn/vue)                                                  |
+| **UI-Library**   | [PrimeVue](https://primevue.org) 4                                                          |
 | **State**        | [Pinia](https://pinia.vuejs.org)                                                            |
 | **ORM**          | [Drizzle](https://orm.drizzle.team)                                                         |
 | **Datenbank**    | [PostgreSQL](https://www.postgresql.org) + [pgvector](https://github.com/pgvector/pgvector) |
@@ -134,7 +134,9 @@ knora/
 │   │   │   ├── wiki.ts
 │   │   │   └── ...
 │   │   └── scripts/
-│   │       └── knora-import.ts  # WeKnora-Import (geplant)
+│   │       ├── weknora-db-import.ts  # WeKnora DB-Migration (Docs, Wiki, Embeddings)
+│   │       ├── embed-backfill.ts     # Batch-Embedding-Backfill
+│   │       └── knora-import.ts       # WeKnora JSON-Import (API-Export)
 │   ├── drizzle.config.ts
 │   └── Dockerfile
 │
@@ -172,8 +174,9 @@ knora/
 │   └── Dockerfile
 │
 ├── docs/
-│   ├── PLAN.md               # Konzept & Plan
-│   └── deployment-standard.md
+│   ├── PLAN.md                 # Konzept, Architektur & Status
+│   ├── deployment-live.md      # Hetzner-Live-Deployment (Knora)
+│   └── deployment-standard.md  # Multi-App-Deployment-Standard
 │
 ├── docker-compose.yml        # Produktion
 ├── docker-compose.dev.yml    # Entwicklung
@@ -199,18 +202,24 @@ Der **Wiki-Graph** visualisiert die Verlinkungen als Force-Directed Graph.
 
 ---
 
-## 📥 WeKnora-Import
+## 📥 WeKnora-Migration
 
-Du hast WeKnora-Wiki-Seiten exportiert? Kein Problem:
+Bestehende WeKnora-Daten (Dokumente, generierte Artikel und deren Embeddings) lassen sich direkt aus der WeKnora-Postgres-DB übernehmen. Da beide Systeme `text-embedding-3-small` (1536 Dim) nutzen, werden die Dokument-Embeddings **1:1 kopiert** – kein Re-Embedding nötig. Nur die generierten Wiki-Artikel werden in Knora frisch vektorisiert.
 
 ```bash
+# 1. Export aus der WeKnora-DB (JSONL.gz): knowledges, wiki_pages, embeddings
+#    via psql row_to_json (siehe scripts/weknora-export.py bzw. docs/PLAN.md)
+
+# 2. Import in Knora
 cd backend
-bun run scripts/knora-import.ts --input weknora-export.json --workspace <workspace-id>
+bun run src/scripts/weknora-db-import.ts <export-dir> --owner=<email> [--dry-run]
+
+# 3. Embeddings für die neu importierten Wiki-Artikel nachziehen
+bun run src/scripts/embed-backfill.ts
 ```
 
-Oder über die UI: **Workspace → Import → WeKnora JSON hochladen**.
-
 Alle `[[Links]]`, Aliase, Quellverweise und Metadaten bleiben erhalten und sind sofort editierbar.
+Für einen API-basierten JSON-Export existiert außerdem [`scripts/knora-import.ts`](backend/src/scripts/knora-import.ts).
 
 ---
 
@@ -248,28 +257,23 @@ bun run db:push       # Schema direkt pushen (Dev)
 
 ## 🚢 Deployment
 
-Siehe [`docs/deployment-standard.md`](docs/deployment-standard.md) für das Hetzner-Deployment.
+Siehe [`docs/deployment-live.md`](docs/deployment-live.md) (Knora live auf Hetzner) und [`docs/deployment-standard.md`](docs/deployment-standard.md) (Multi-App-Standard).
 
 Kurzfassung:
 
 ```bash
-./deploy.sh user@hetzner-host
+./deploy.sh [branch] elmarhepp   # git pull + docker compose up -d --build
 ```
 
 ---
 
-## 📋 Roadmap
+## 📋 Status
 
-| Phase       | Inhalt                                                                       |
-| ----------- | ---------------------------------------------------------------------------- |
-| **Phase 1** | Stabilisierung: Redis entfernen, Drizzle-Migration, Shared Types, UI-Library |
-| **Phase 2** | Wiki-UI & Editor: Browser, TipTap, Graph                                     |
-| **Phase 3** | Chat & Streaming: Vercel AI SDK, SSE                                         |
-| **Phase 4** | WeKnora Import & Dokument-Parsing                                            |
-| **Phase 5** | Wiki-Auto-Generierung & Prompt-Templates                                     |
-| **Phase 6** | Erweiterungen: Batch-Import, Web-Suche, Preview                              |
+Kernfunktionen sind implementiert und live: Auth, Workspaces, Dokument-Import (inkl. Parser für PDF/DOCX), hybride Suche, RAG-Chat mit Streaming & Historie, Wiki-Generierung (Summary/Entity/Concept), TipTap-Editor, Wiki-Graph, YouTube-Import und die WeKnora-Migration.
 
-Detailplan: [`docs/PLAN.md`](docs/PLAN.md)
+Offen / optional: URL-Scraping-Import, Knowledge-Graph-Pipeline (`graph_enabled`), Web-Suche.
+
+Details & Architektur: [`docs/PLAN.md`](docs/PLAN.md)
 
 ---
 

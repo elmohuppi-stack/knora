@@ -208,6 +208,10 @@ Anders als [WeKnora](https://github.com/Tencent/WeKnora) (Enterprise-Knowledge-B
 
 ## 📦 WeKnora Export/Import – Strategie
 
+> **Status: umgesetzt.** Realisiert wurde eine **direkte DB→DB-Migration** (nicht der API-Weg), da WeKnora selbst gehostet wird und beide Postgres-DBs auf demselben Host liegen. Skripte: [`weknora-db-import.ts`](../backend/src/scripts/weknora-db-import.ts) (+ [`embed-backfill.ts`](../backend/src/scripts/embed-backfill.ts)). Der API-basierte JSON-Weg unten bleibt als Alternative dokumentiert ([`knora-import.ts`](../backend/src/scripts/knora-import.ts)).
+>
+> **Embeddings 1:1:** WeKnora und Knora nutzen beide `text-embedding-3-small` (1536 Dim). Dokument-Chunk-Vektoren werden direkt kopiert (`halfvec`→`vector`), nur die generierten Wiki-Artikel werden in Knora neu vektorisiert.
+
 ### Hintergrund
 
 Du hast in WeKnora viele Dokumente, Videos und Artikel importiert, woraus Wiki-Seiten generiert wurden. Diese möchtest du exportieren und verlustfrei in Knora importieren, um sie dort weiter zu editieren.
@@ -251,9 +255,9 @@ WeKnora speichert Wiki-Seiten via REST API mit folgender Struktur:
 | `in_links`                  | `wiki_pages.in_links`                       | ✅ 1:1                            |
 | `version`                   | `wiki_pages.version`                        | ✅ 1:1                            |
 | `created_at` / `updated_at` | `wiki_pages.created_at` / `updated_at`      | ✅ 1:1                            |
-| `aliases`                   | **NEU**: `wiki_pages.aliases` (JSONB)       | 🆕 Migration nötig                |
-| `source_refs`               | **NEU**: `wiki_pages.source_refs` (JSONB)   | 🆕 Migration nötig                |
-| `page_metadata`             | **NEU**: `wiki_pages.page_metadata` (JSONB) | 🆕 Migration nötig                |
+| `aliases`                   | `wiki_pages.aliases` (JSONB)                | ✅ vorhanden                      |
+| `source_refs`               | `wiki_pages.source_refs` (JSONB)            | ✅ vorhanden                      |
+| `page_metadata`             | `wiki_pages.page_metadata` (JSONB)          | ✅ vorhanden                      |
 
 ### `[[Links]]` – Markdown-Kompatibilität
 
@@ -322,69 +326,32 @@ export const wikiPages = pgTable("wiki_pages", {
 
 ---
 
-## 🗺️ Roadmap
+## 🗺️ Status & Roadmap
 
-### ✅ Bereits implementiert
+### ✅ Implementiert (live)
 
-- [x] Auth (Register/Login) – JWT + bcrypt
-- [x] User CRUD (Admin)
-- [x] Model-Provider CRUD
-- [x] Workspace CRUD
-- [x] Dokument-CRUD + Upload
-- [x] Chunking-Logik (`splitIntoChunks`)
-- [x] Embedding-Service (OpenAI-kompatibel)
+- [x] Auth (Register/Login) – JWT + bcrypt, Rollen Admin/Editor/Viewer
+- [x] User-, Model-Provider-, Workspace-CRUD (Admin-Panel)
+- [x] Dokument-Import: Upload, URL, YouTube + Parser-Service (PDF/DOCX/HTML)
+- [x] Chunking + Embedding-Service (OpenAI-kompatibel, `text-embedding-3-small`)
 - [x] Hybrid Search (pgvector + tsvector)
-- [x] RAG Chat (mit Quellenangabe)
-- [x] Wiki-Seiten CRUD
-- [x] Datenbank-Schema (alle Tabellen)
-- [x] Seed-Script (Admin-User)
-- [x] Docker Compose (angepasst)
-- [x] Deploy-Script
+- [x] RAG-Chat mit Quellenangaben, SSE-Streaming (Vercel AI SDK) und Historie-Sidebar
+- [x] UI-Library PrimeVue 4 + Navigations-Grundgerüst
+- [x] Wiki-Browser (Tabs Summary/Entity/Concept, Suche, Filter)
+- [x] TipTap-Editor mit `[[slug]]`-Autocompletion, klickbare `[[Links]]`
+- [x] Wiki-Graph (D3.js Force-Directed)
+- [x] Wiki-Auto-Generierung: LLM aus Chunks → Summary/Entity/Concept mit Crosslinks (`wiki-generate.ts`, Prompts in `wiki-prompts.ts`)
+- [x] JSONB-Felder `aliases`, `source_refs`, `page_metadata`, `chunk_refs` auf `wiki_pages`
+- [x] WeKnora-Migration (DB→DB): Dokumente, generierte Artikel, Embeddings 1:1 (`weknora-db-import.ts` + `embed-backfill.ts`)
+- [x] Docker Compose + Deploy-Script (Hetzner)
 
-### 🔧 Phase 1 – Stabilisierung & Tech-Stack-Korrektur
+### 🔜 Offen / optional
 
-1. [ ] Redis aus `docker-compose.yml` & `.env` entfernen
-2. [ ] Drizzle Migration: `aliases`, `source_refs`, `page_metadata` zu `wiki_pages`
-3. [ ] Shared Types (`packages/shared/src/types/wiki.ts`) erweitern
-4. [ ] UI-Library installieren (PrimeVue oder Shadcn/vue)
-5. [ ] Frontend-Grundgerüst: Sidebar + Header + Content-Area
-
-### 🚀 Phase 2 – Wiki-UI & Editor
-
-6. [ ] Wiki-Browser-Komponente (Seitenliste, Tree, Suche, Filter)
-7. [ ] TipTap Wiki-Editor mit `[[slug]]`-Autocompletion
-8. [ ] Wiki-Seite anzeigen: Markdown-Rendering mit klickbaren `[[Links]]`
-9. [ ] Wiki-Seite erstellen/bearbeiten (TipTap → API → DB)
-10. [ ] Wiki-Graph (D3.js Force-Directed)
-
-### 💬 Phase 3 – Chat & Streaming
-
-11. [ ] Vercel AI SDK installieren & einrichten
-12. [ ] SSE-Streaming im Chat (`streamText()` statt blockierendem fetch)
-13. [ ] `StreamResponse`-Format mit `response_type` (answer, thinking, error, complete)
-14. [ ] Chat-UI: Nachrichtenliste, Streaming, Quellenangaben, Ladezustand
-
-### 📥 Phase 4 – WeKnora Import & Dokumente
-
-15. [x] `backend/src/scripts/knora-import.ts` – WeKnora-Wiki-Seiten importieren (CLI)
-16. [x] `POST /api/v1/wiki/:workspaceId/import` – Import-Endpoint + Frontend-UI (Drag & Drop / Paste JSON)
-17. [x] YouTube-Import: oEmbed + Transcript API → Wiki-Seite (Backend + Frontend in DocumentList)
-18. [ ] URL-Import: Webseite scrapen → Markdown → Chunks
-
-### 🧠 Phase 5 – Wiki-Generierung & Auto-Ingest
-
-19. [ ] Wiki-Auto-Generierung: LLM aus Chunks → Wiki-Seite mit `[[Links]]`
-20. [ ] Indexing Strategy vollständig: `wiki_enabled`-Pipeline
-21. [ ] Prompt-Templates in JSON/YAML auslagern
-22. [ ] Wiki-Versionierung (Änderungen nachverfolgen)
-
-### 🌟 Phase 6 – Erweiterungen
-
-23. [ ] Batch-Dokumenten-Import
-24. [ ] Dokumenten-Preview (PDF, Markdown)
-25. [ ] Conversation-Strategy konfigurierbar (thresholds, fallback, rewrite)
-26. [ ] Web-Suche Integration (optional)
-27. [ ] Knowledge Graph (`graph_enabled`-Pipeline)
+- [ ] URL-Import: Webseite scrapen → Markdown → Chunks
+- [ ] Dokumenten-Preview (PDF, Markdown) in der UI
+- [ ] Conversation-Strategy konfigurierbar (thresholds, fallback, rewrite)
+- [ ] Web-Suche-Integration
+- [ ] Knowledge-Graph-Pipeline (`graph_enabled`)
 
 ---
 
@@ -456,13 +423,13 @@ networks:
 | **Backend**        | Bun + Hono (✅ bereits implementiert)                     |
 | **API**            | REST + `@hono/zod-validator` (❌ tRPC gestrichen)         |
 | **Frontend**       | Vue 3 + Vite (✅ bereits implementiert)                   |
-| **UI-Library**     | PrimeVue oder Shadcn/vue (🔧 muss installiert werden)     |
+| **UI-Library**     | PrimeVue 4 (✅ installiert)                                |
 | **State**          | Pinia (✅ bereits implementiert)                          |
 | **ORM**            | Drizzle (✅ bereits implementiert)                        |
 | **DB**             | PostgreSQL + pgvector (✅ bereits implementiert)          |
 | **Redis**          | ❌ Kein Redis im MVP                                      |
-| **LLM**            | Vercel AI SDK (🔧 muss eingebaut werden)                  |
-| **Streaming**      | SSE via Vercel AI SDK (🔧 Priorität)                      |
+| **LLM**            | Vercel AI SDK (✅ eingebaut)                              |
+| **Streaming**      | SSE via Vercel AI SDK (✅ implementiert)                  |
 | **Parser**         | MVP: Text/Markdown • v1: pdf.js • v2: MarkItDown optional |
 | **Task Queue**     | Keine (inline) – später Bun Worker                        |
 | **Wiki-Editor**    | TipTap (✅ bereits in Dependencies)                       |
@@ -470,4 +437,4 @@ networks:
 | **File Storage**   | Lokales Filesystem (✅ bereits implementiert)             |
 | **Shared Types**   | `packages/shared/` (✅ erweitert)                         |
 | **Auth**           | JWT + bcrypt (✅ bereits implementiert)                   |
-| **WeKnora Import** | Neue JSONB-Felder + Import-Skript (🔧 Phase 4)            |
+| **WeKnora Import** | DB→DB-Migration inkl. Embeddings (✅ umgesetzt)           |

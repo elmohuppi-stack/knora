@@ -18,12 +18,6 @@
             {{ w.name }}
           </option>
         </select>
-        <router-link
-          :to="`/workspaces/${workspaceId}/settings`"
-          class="btn-icon"
-          title="Workspace-Einstellungen"
-          >⚙️</router-link
-        >
       </div>
     </div>
 
@@ -54,38 +48,6 @@
       <router-view />
     </div>
 
-    <!-- Workspace Settings Dialog -->
-    <div
-      v-if="showSettings"
-      class="dialog-overlay"
-      @click.self="showSettings = false"
-    >
-      <div class="dialog">
-        <h3>Workspace bearbeiten</h3>
-        <div class="field">
-          <label>Name</label>
-          <input v-model="editName" />
-        </div>
-        <div class="field">
-          <label>Beschreibung</label>
-          <textarea v-model="editDesc"></textarea>
-        </div>
-        <div class="field">
-          <label>Chunk Size</label>
-          <input v-model.number="editChunkSize" type="number" />
-        </div>
-        <div class="field">
-          <label>Chunk Overlap</label>
-          <input v-model.number="editChunkOverlap" type="number" />
-        </div>
-        <div class="dialog-actions">
-          <button class="btn-secondary" @click="showSettings = false">
-            Abbrechen
-          </button>
-          <button class="btn-primary" @click="saveSettings">Speichern</button>
-        </div>
-      </div>
-    </div>
     <ConfirmModal
       :show="showConfirm"
       :options="confirmOptions"
@@ -128,11 +90,6 @@ const activeTab = computed(() => {
 const ws = ref<any>(null);
 const allWorkspaces = ref<any[]>([]);
 const selectedWorkspaceId = ref("");
-const showSettings = ref(false);
-const editName = ref("");
-const editDesc = ref("");
-const editChunkSize = ref(512);
-const editChunkOverlap = ref(50);
 
 onMounted(async () => {
   await Promise.all([loadCurrentWorkspace(), loadAllWorkspaces()]);
@@ -150,10 +107,6 @@ async function loadCurrentWorkspace() {
     });
     const data = res.data.workspace;
     ws.value = data;
-    editName.value = data.name;
-    editDesc.value = data.description || "";
-    editChunkSize.value = data.chunk_size || 512;
-    editChunkOverlap.value = data.chunk_overlap || 50;
     // Dropdown-Auswahl auf die aufgelöste UUID setzen, damit sie in der Liste matcht.
     selectedWorkspaceId.value = data.id;
   } catch (e: any) {
@@ -190,24 +143,6 @@ function switchWorkspace() {
   }
 }
 
-async function saveSettings() {
-  try {
-    await axios.put(
-      `/api/v1/workspaces/${workspaceId.value}`,
-      {
-        name: editName.value,
-        description: editDesc.value,
-        chunk_size: editChunkSize.value,
-        chunk_overlap: editChunkOverlap.value,
-      },
-      { headers: { Authorization: `Bearer ${auth.token}` } },
-    );
-    showSettings.value = false;
-    await loadAllWorkspaces();
-  } catch (e: any) {
-    console.error("[hub] Fehler beim Speichern:", e.message);
-  }
-}
 </script>
 
 <style scoped>
