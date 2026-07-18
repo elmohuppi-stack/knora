@@ -1,7 +1,14 @@
 <template>
   <main class="chat-layout">
+    <!-- Backdrop für den mobilen History-Drawer -->
+    <div
+      v-if="historyOpen"
+      class="chat-sidebar-backdrop"
+      @click="historyOpen = false"
+    ></div>
+
     <!-- Historie-Sidebar -->
-    <aside class="chat-sidebar">
+    <aside class="chat-sidebar" :class="{ open: historyOpen }">
       <button class="new-chat-btn" @click="newChat">
         <span>＋</span> Neuer Chat
       </button>
@@ -30,6 +37,13 @@
     <!-- Chat-Bereich -->
     <section class="chat-main">
       <div class="chat-header">
+        <button
+          class="history-toggle"
+          @click="historyOpen = true"
+          title="Verlauf"
+        >
+          <i class="pi pi-bars"></i>
+        </button>
         <h3>Chat</h3>
       </div>
 
@@ -102,6 +116,8 @@ const isStreaming = ref(false);
 const messagesRef = ref<HTMLDivElement>();
 const sessions = ref<any[]>([]);
 const sessionId = ref<string | null>(null);
+// Steuert den ausklappbaren Verlauf-Drawer auf dem Handy
+const historyOpen = ref(false);
 
 onMounted(() => {
   if (!auth.isAuthenticated) {
@@ -158,10 +174,12 @@ function newChat() {
   sessionId.value = null;
   messages.value = [];
   input.value = "";
+  historyOpen.value = false;
 }
 
 async function openSession(s: any) {
   if (isStreaming.value) return;
+  historyOpen.value = false;
   sessionId.value = s.id;
   if (s.workspace_id) workspaceId.value = s.workspace_id;
   try {
@@ -355,6 +373,24 @@ async function sendMessage() {
 .chat-header {
   padding: 1rem 1.5rem;
   border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Verlauf-Toggle + Backdrop: nur auf dem Handy sichtbar */
+.history-toggle {
+  display: none;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--color-text);
+}
+.chat-sidebar-backdrop {
+  display: none;
 }
 
 .messages {
@@ -452,5 +488,59 @@ async function sendMessage() {
 .send-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  /* Verlauf als einschiebbarer Drawer statt fester Spalte */
+  .history-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .chat-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 60;
+    width: 80vw;
+    max-width: 320px;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.2);
+  }
+  .chat-sidebar.open {
+    transform: translateX(0);
+  }
+  .chat-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  .chat-header {
+    padding: 0.75rem 1rem;
+  }
+  .messages {
+    padding: 0.75rem 1rem;
+  }
+  .bubble {
+    max-width: 85%;
+  }
+  .input-bar {
+    flex-wrap: wrap;
+    padding: 0.6rem 0.75rem;
+    padding-bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px));
+  }
+  .ws-select {
+    order: -1;
+    width: 100%;
+  }
+  .msg-input {
+    flex: 1;
+    min-width: 0;
+  }
 }
 </style>

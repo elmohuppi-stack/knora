@@ -707,4 +707,36 @@ async function loadLogs() {
   font-size: 0.875rem;
   margin-top: 0.5rem;
 }
+
+@media (max-width: 768px) {
+  .tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tab {
+    padding: 0.7rem 1rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .content {
+    padding: 1rem;
+  }
+  .section-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .provider-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .dialog {
+    width: calc(100vw - 2rem);
+    max-width: calc(100vw - 2rem);
+    padding: 1.25rem;
+  }
+}
 </style>

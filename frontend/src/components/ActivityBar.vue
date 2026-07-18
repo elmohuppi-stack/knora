@@ -288,4 +288,11 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
+
+/* Auf Mobil sitzt die Bottom-Nav (56px) am unteren Rand – Log-Leiste darüber schieben */
+@media (max-width: 768px) {
+  .activity-bar {
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
+}
 </style>

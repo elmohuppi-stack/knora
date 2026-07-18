@@ -1,5 +1,5 @@
 <template>
-  <div class="wiki-layout">
+  <div class="wiki-layout" :class="{ 'has-selection': selectedPage }">
     <!-- Left sidebar: Search + Tabs + Page list -->
     <aside class="wiki-sidebar">
       <div class="sidebar-search">
@@ -977,5 +977,52 @@ function closeImport() {
   cursor: pointer;
   font-size: 0.875rem;
   font-family: inherit;
+}
+
+/* ---- Responsive: Master/Detail statt Split-Panel ---- */
+@media (max-width: 768px) {
+  .wiki-layout {
+    /* Nicht mehr nebeneinander – jeweils ein Panel füllt die Breite */
+    display: block;
+    overflow: visible;
+  }
+
+  /* Ohne Auswahl: nur die Liste (Master) */
+  .wiki-sidebar {
+    width: 100%;
+    min-width: 0;
+    border-right: none;
+    height: 100%;
+  }
+  .wiki-reader {
+    display: none;
+  }
+
+  /* Mit Auswahl: nur der Reader (Detail), Liste ausblenden */
+  .wiki-layout.has-selection .wiki-sidebar {
+    display: none;
+  }
+  .wiki-layout.has-selection .wiki-reader {
+    display: block;
+    padding: 1rem 1.1rem;
+  }
+
+  .reader-header h2 {
+    font-size: 1.35rem;
+    /* Lange Titel/URLs umbrechen statt einwortig einlaufen */
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .reader-body {
+    overflow-wrap: anywhere;
+  }
+
+  /* Dialoge müssen auf schmale Screens passen */
+  .dialog,
+  .dialog-wide {
+    min-width: 0;
+    width: calc(100vw - 2rem);
+    max-width: calc(100vw - 2rem);
+  }
 }
 </style>

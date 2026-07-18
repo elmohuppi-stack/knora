@@ -890,4 +890,51 @@ function formatDate(dateStr: string) {
   color: #d32f2f;
   font-size: 0.875rem;
 }
+
+@media (max-width: 768px) {
+  .header {
+    padding: 0.75rem 1rem;
+    gap: 0.6rem;
+  }
+  .header-actions {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .header-actions .btn-primary {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+  }
+  .content {
+    padding: 0.75rem;
+  }
+  .upload-area {
+    padding: 0.75rem 1rem;
+  }
+  .file-input,
+  .url-input {
+    max-width: none;
+    width: 100%;
+  }
+  /* Kompaktere Tabelle: Typ- und Datums-Spalte auf dem Handy ausblenden */
+  .table th:nth-child(2),
+  .table td:nth-child(2),
+  .table th:nth-child(4),
+  .table td:nth-child(4) {
+    display: none;
+  }
+  .table th,
+  .table td {
+    padding: 0.55rem 0.5rem;
+  }
+  .doc-title {
+    max-width: 55vw;
+  }
+  /* Dialoge an schmale Screens anpassen */
+  .dialog,
+  .dialog-wide {
+    min-width: 0;
+    width: calc(100vw - 2rem);
+    max-width: calc(100vw - 2rem);
+  }
+}
 </style>

@@ -593,4 +593,36 @@ function formatDate(dateStr: string) {
   font-family: inherit;
   margin: 0;
 }
+
+@media (max-width: 768px) {
+  .header {
+    padding: 0.6rem 1rem;
+    gap: 0.6rem;
+  }
+  .content {
+    padding: 1rem;
+  }
+  /* Meta + Video übereinander stapeln */
+  .meta-video-row {
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+  }
+  .meta-video {
+    width: 100%;
+  }
+  /* Tabs horizontal scrollbar statt gequetscht */
+  .tabs-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tabs-bar::-webkit-scrollbar {
+    display: none;
+  }
+  .tabs-bar .tab {
+    padding: 0.6rem 0.9rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+}
 </style>

@@ -53,6 +53,31 @@
 
     <!-- Globale Log-Leiste (dezent, unten, ein-/ausklappbar) -->
     <ActivityBar />
+
+    <!-- Mobile Bottom-Nav (nur auf kleinen Screens sichtbar) -->
+    <nav class="mobile-nav">
+      <router-link to="/chat" class="mobile-nav-item">
+        <i class="pi pi-comments"></i>
+        <span>Chat</span>
+      </router-link>
+      <a
+        href="/workspaces"
+        class="mobile-nav-item"
+        :class="{ 'router-link-active': isWorkspacesRoute }"
+        @click.prevent="openWorkspaces"
+      >
+        <i class="pi pi-folder"></i>
+        <span>Workspaces</span>
+      </a>
+      <router-link to="/settings" class="mobile-nav-item">
+        <i class="pi pi-cog"></i>
+        <span>Einstellungen</span>
+      </router-link>
+      <button class="mobile-nav-item" @click="toggleTheme">
+        <i :class="isDark ? 'pi pi-sun' : 'pi pi-moon'"></i>
+        <span>{{ isDark ? "Hell" : "Dunkel" }}</span>
+      </button>
+    </nav>
   </div>
 
   <!-- Login-Seite ohne Layout -->
@@ -72,6 +97,10 @@ const route = useRoute();
 const isDark = ref(localStorage.getItem("knora-theme") === "dark");
 const sidebarCollapsed = ref(
   localStorage.getItem("knora-sidebar") === "collapsed",
+);
+
+const isWorkspacesRoute = computed(() =>
+  route.path.startsWith("/workspaces"),
 );
 
 // Zuletzt aktiven Workspace für Direktsprung merken
@@ -426,5 +455,66 @@ a {
 button {
   cursor: pointer;
   font-family: inherit;
+}
+
+/* Mobile Bottom-Nav: standardmäßig versteckt (Desktop nutzt die Sidebar) */
+.mobile-nav {
+  display: none;
+}
+
+/* ---- Responsive: Handy / kleine Tablets ---- */
+@media (max-width: 768px) {
+  /* Seitliche Sidebar auf Mobil komplett ausblenden */
+  .app-sidebar {
+    display: none;
+  }
+
+  .app-content {
+    /* Platz für die fixe Bottom-Nav (56px) + etwas Luft */
+    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .mobile-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: var(--color-sidebar-bg);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .mobile-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    background: none;
+    border: none;
+    color: var(--color-sidebar-text);
+    text-decoration: none;
+    font-size: 0.65rem;
+    padding: 0.35rem 0;
+    transition: color 0.15s;
+  }
+
+  .mobile-nav-item i {
+    font-size: 1.25rem;
+  }
+
+  .mobile-nav-item:hover {
+    color: #fff;
+  }
+
+  .mobile-nav-item.router-link-active,
+  .mobile-nav-item.router-link-exact-active {
+    /* Feste Akzentfarbe: liest sich in beiden Themes auf dem dunklen Bar-Hintergrund */
+    color: #4f8cff;
+  }
 }
 </style>

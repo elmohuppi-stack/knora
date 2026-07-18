@@ -270,4 +270,23 @@ function formatDate(dateStr: string) {
   font-size: 0.875rem;
   margin-top: 0.5rem;
 }
+
+@media (max-width: 768px) {
+  .header {
+    padding: 0.75rem 1rem;
+    gap: 0.6rem;
+  }
+  .content {
+    padding: 1rem;
+  }
+  .ws-grid {
+    /* Eine Spalte auf dem Handy */
+    grid-template-columns: 1fr;
+  }
+  .dialog {
+    min-width: 0;
+    width: calc(100vw - 2rem);
+    max-width: calc(100vw - 2rem);
+  }
+}
 </style>

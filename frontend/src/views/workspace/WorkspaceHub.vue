@@ -237,4 +237,39 @@ function switchWorkspace() {
 .btn-icon:hover {
   background: var(--color-bg-secondary);
 }
+
+@media (max-width: 768px) {
+  .hub-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+    padding: 0.75rem 1rem;
+  }
+  .hub-header-left {
+    gap: 0.6rem;
+  }
+  .hub-header-left h3 {
+    font-size: 1.1rem;
+  }
+  .hub-header-actions {
+    justify-content: flex-end;
+  }
+  .ws-switch {
+    flex: 1;
+    min-width: 0;
+  }
+  .hub-tabs {
+    padding: 0 0.5rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .hub-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .hub-tabs .tab {
+    padding: 0.7rem 0.9rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+}
 </style>
