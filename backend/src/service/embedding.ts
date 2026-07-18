@@ -1,6 +1,6 @@
 import { db } from "../db/index.ts";
 import { chunks, modelProviders, documents } from "../db/schema.ts";
-import { eq, isNull, and } from "drizzle-orm";
+import { eq, isNull, and, sql } from "drizzle-orm";
 
 // OpenAI-kompatible Embedding-API aufrufen
 async function generateEmbedding(text: string): Promise<number[] | null> {
@@ -83,11 +83,14 @@ export async function embedChunk(chunkId: string, content: string) {
   if (!vector) return false;
 
   try {
-    // pgvector erwartet ein JSON-Array oder einen String im PostgreSQL-Format
-    await db.execute(`UPDATE chunks SET embedding = $1::vector WHERE id = $2`, [
-      `[${vector.join(",")}]`,
-      chunkId,
-    ]);
+    // pgvector erwartet einen String im PostgreSQL-Format "[1,2,3]".
+    // sql-Template statt db.execute mit Positions-Parametern, das der
+    // node-postgres-Treiber hier nicht korrekt bindet ("no parameter $2").
+    const vectorLiteral = `[${vector.join(",")}]`;
+    await db
+      .update(chunks)
+      .set({ embedding: sql`${vectorLiteral}::vector` })
+      .where(eq(chunks.id, chunkId));
     return true;
   } catch (e: any) {
     console.error(

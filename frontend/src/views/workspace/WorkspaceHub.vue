@@ -187,7 +187,7 @@ async function saveSettings() {
       { headers: { Authorization: `Bearer ${auth.token}` } },
     );
     showSettings.value = false;
-    await loadWorkspaces();
+    await loadAllWorkspaces();
   } catch (e: any) {
     console.error("[hub] Fehler beim Speichern:", e.message);
   }

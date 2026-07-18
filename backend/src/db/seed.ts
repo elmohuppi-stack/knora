@@ -5,23 +5,27 @@ import bcrypt from "bcryptjs";
 async function seed() {
   console.log("🌱 Seeding database...");
 
-  const password_hash = await bcrypt.hash("admin123", 12);
+  const email = process.env.ADMIN_EMAIL ?? "admin@knora.app";
+  const password = process.env.ADMIN_PASSWORD ?? "admin123";
+  const name = process.env.ADMIN_NAME ?? "Admin";
+
+  const password_hash = await bcrypt.hash(password, 12);
 
   const [admin] = await db
     .insert(users)
     .values({
-      email: "admin@knora.app",
+      email,
       password_hash,
-      name: "Admin",
+      name,
       role: "admin",
     })
     .onConflictDoNothing()
     .returning();
 
   if (admin) {
-    console.log(`✅ Created admin user: ${admin.email} (password: admin123)`);
+    console.log(`✅ Created admin user: ${admin.email}`);
   } else {
-    console.log("ℹ️  Admin user already exists");
+    console.log(`ℹ️  Admin user already exists (${email})`);
   }
 
   console.log("🌱 Seed complete!");

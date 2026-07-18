@@ -1,9 +1,6 @@
 BUN := $(shell command -v bun 2>/dev/null || echo ~/.bun/bin/bun)
-HOST ?= $(DEPLOY_HOST)
 
-.PHONY: help start stop dev dev-frontend dev-all restart kill rebuild \
-        build migrate db-generate seed shell-backend install deploy \
-        docker-build docker-up docker-down logs status
+.PHONY: help install build start stop restart migrate seed
 
 help: ## 📖 Zeigt diese Hilfe an
 	@echo ""
@@ -11,39 +8,15 @@ help: ## 📖 Zeigt diese Hilfe an
 	@echo "║           Knora — Makefile           ║"
 	@echo "╚══════════════════════════════════════╝"
 	@echo ""
-	@echo "📦  Installation"
-	@echo "  make install         Alle Abhängigkeiten installieren"
+	@echo "  make install    Alle Abhängigkeiten installieren"
+	@echo "  make build      Backend + Frontend bauen"
+	@echo "  make start      DB + Backend + Frontend starten (Hot-Reload)"
+	@echo "  make stop       Alles stoppen (Prozesse + DB)"
+	@echo "  make restart    Neustart (stop + start)"
 	@echo ""
-	@echo "🚀  Entwicklung (lokal — Backend + Frontend nativ)"
-	@echo "  make start           Docker-Services starten (PostgreSQL)"
-	@echo "  make dev             Backend starten (Bun, Port 3000, Hot-Reload)"
-	@echo "  make dev-frontend    Frontend starten (Vite, Port 5173, HMR)"
-	@echo "  make dev-all         Services + Backend + Frontend starten"
-	@echo "  make kill            Alle lokalen Prozesse beenden (Backend + Frontend)"
-	@echo "  make restart         Komplett-Neustart (kill + start)"
-	@echo "  make rebuild         Komplett-Neustart mit Neuinstallation"
-	@echo "  make stop            Docker-Services stoppen"
-	@echo "  make logs            Docker-Services Logs anzeigen"
-	@echo "  make status          Docker-Services Status prüfen"
+	@echo "  make migrate    DB-Migration ausführen"
+	@echo "  make seed       DB mit Admin-User seeden"
 	@echo ""
-	@echo "🗄️  Datenbank"
-	@echo "  make db-generate     Drizzle Migration generieren (nach Schema-Änderung)"
-	@echo "  make migrate         Migration ausführen"
-	@echo "  make seed            Datenbank mit Testdaten füllen"
-	@echo "  make shell-db        PostgreSQL-Shell öffnen"
-	@echo ""
-	@echo "🐳  Docker (Produktion)"
-	@echo "  make build           Docker-Images bauen"
-	@echo "  make up              Docker-Services starten (Produktion)"
-	@echo "  make down            Docker-Services stoppen (Produktion)"
-	@echo ""
-	@echo "🚢  Deployment (Hetzner)"
-	@echo "  make deploy HOST=user@server   Auf Hetzner deployen"
-	@echo ""
-	@echo "⚙️  Config: BUN=$(BUN)  |  HOST=$(HOST)"
-	@echo ""
-
-# === Installation ===
 
 install: ## 📦 Alle Abhängigkeiten installieren
 	@echo "📦 Installiere Abhängigkeiten..."
@@ -53,30 +26,16 @@ install: ## 📦 Alle Abhängigkeiten installieren
 	$(BUN) install
 	@echo "✅ Fertig!"
 
-# === Entwicklung (lokal) ===
+build: ## 🔨 Backend + Frontend bauen
+	@echo "🔨 Baue Backend..."
+	cd backend && $(BUN) run build
+	@echo "🔨 Baue Frontend..."
+	cd frontend && $(BUN) run build
+	@echo "✅ Build abgeschlossen!"
 
-start: ## 🚀 Docker-Services starten (PostgreSQL)
+start: ## 🚀 DB + Backend + Frontend starten (Hot-Reload)
 	@echo "🚀 Starte PostgreSQL..."
-	docker compose -f docker-compose.dev.yml up -d db
-	@echo "   DB:  postgresql://localhost:5432/knora (User: knora)"
-	@echo ""
-	@echo "💡 Parser (optional): docker compose -f docker-compose.dev.yml --profile parser up -d"
-
-stop: ## 🛑 Docker-Services stoppen
-	@echo "🛑 Stoppe Docker-Services..."
-	docker compose -f docker-compose.dev.yml down
-
-dev: ## 🔥 Backend starten (Bun, Port 3000, Hot-Reload)
-	@echo "🔥 Starte Backend auf http://localhost:3000 ..."
-	cd backend && $(BUN) run dev
-
-dev-frontend: ## 💻 Frontend starten (Vite, Port 5173, HMR)
-	@echo "💻 Starte Frontend auf http://localhost:5173 ..."
-	cd frontend && $(BUN) run dev
-
-dev-all: ## 🚀🔥 Alles starten (Services + Backend + Frontend)
-	@echo "🚀 Starte PostgreSQL (falls nicht bereits laufend)..."
-	@docker compose -f docker-compose.dev.yml up -d db 2>/dev/null || true
+	@docker compose -f docker-compose.dev.yml up -d db
 	@echo ""
 	@if lsof -t -i:3000 >/dev/null 2>&1; then \
 		echo "⚠️  Backend läuft bereits auf Port 3000 (überspringe)"; \
@@ -93,57 +52,23 @@ dev-all: ## 🚀🔥 Alles starten (Services + Backend + Frontend)
 		cd frontend && $(BUN) run dev; \
 	fi
 
-kill: ## 🛑 Alle lokalen Prozesse beenden (Backend + Frontend)
+stop: ## 🛑 Alles stoppen (Prozesse + DB)
 	@echo "🛑 Beende Backend (Port 3000)..."
 	@lsof -t -i:3000 2>/dev/null | xargs kill -9 2>/dev/null || echo "   Kein Prozess auf Port 3000"
 	@echo "🛑 Beende Frontend (Port 5173)..."
 	@lsof -t -i:5173 2>/dev/null | xargs kill -9 2>/dev/null || echo "   Kein Prozess auf Port 5173"
-	@sleep 1
-	@echo "✅ Alle Prozesse beendet"
+	@echo "🛑 Stoppe PostgreSQL..."
+	@docker compose -f docker-compose.dev.yml down
+	@echo "✅ Alles gestoppt"
 
-restart: kill dev-all ## 🔄 Komplett-Neustart (kill + PostgreSQL + Backend + Frontend)
-	@echo ""
-	@echo "✅ Neustart abgeschlossen!"
-	@echo "   Frontend: http://localhost:5173"
-	@echo "   Backend:  http://localhost:3000"
+restart: stop start ## 🔄 Neustart (stop + start)
 
-rebuild: kill ## 🔨 Komplett-Neustart mit Neuinstallation
-	@echo "📦 Installiere Abhängigkeiten..."
-	@cd packages/shared && $(BUN) install --frozen-lockfile 2>/dev/null || cd packages/shared && $(BUN) install
-	@cd backend && $(BUN) install --frozen-lockfile 2>/dev/null || cd backend && $(BUN) install
-	@cd frontend && $(BUN) install --frozen-lockfile 2>/dev/null || cd frontend && $(BUN) install
-	@$(BUN) install --frozen-lockfile 2>/dev/null || $(BUN) install
-	@echo ""
-	@$(MAKE) dev-all
-
-logs: ## 📋 Docker-Services Logs anzeigen
-	docker compose -f docker-compose.dev.yml logs -f
-
-status: ## 🔍 Docker-Services Status prüfen
-	@echo "🔍 Status:"
-	docker compose -f docker-compose.dev.yml ps
-	@echo ""
-	@echo "PostgreSQL:"
-	@docker compose -f docker-compose.dev.yml exec db pg_isready -U knora 2>/dev/null || echo "   ❌ Nicht erreichbar"
-	@echo "Parser:"
-	@curl -s http://localhost:8001/ 2>/dev/null && echo "   ✅ Laufend" || echo "   ❌ Nicht gestartet (optional: --profile parser)"
-
-# === Datenbank ===
-
-db-generate: ## 🗄️ Drizzle Migration generieren (nach Schema-Änderung)
-	@echo "🗄️ Generiere Migration..."
-	cd backend && $(BUN) run db:generate
-	@echo "✅ Migration generiert in backend/drizzle/"
-
-migrate: ## 🗄️ Migration ausführen
+migrate: ## 🗄️ DB-Migration ausführen
 	@echo "🗄️ Führe Migration aus..."
 	cd backend && $(BUN) run db:migrate
 	@echo "✅ Migration ausgeführt!"
 
-seed: ## 🌱 Datenbank mit Testdaten füllen
-	@echo "🌱 Fülle Datenbank mit Testdaten..."
+seed: ## 🌱 DB mit Admin-User seeden
+	@echo "🌱 Seede Datenbank..."
 	cd backend && $(BUN) run db:seed
 	@echo "✅ Seed abgeschlossen!"
-
-shell-db: ## 🐚 PostgreSQL-Shell öffnen
-	docker compose -f docker-compose.dev.yml exec db psql -U knora knora
