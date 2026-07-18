@@ -23,9 +23,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
     # Große Uploads werden mehrfach in den RAM kopiert (parseBody → arrayBuffer → Blob).
-    # Ohne Limit kann ein Riesen-Upload den Host-RAM sprengen; mit Limit fällt im
-    # Zweifel nur dieser Container (kontrollierter OOM-Restart), nicht der ganze Server.
-    mem_limit: 2g
+    # Cap an den kleinen, geteilten Prod-Host (3,7 GB, ~15 weitere Apps) angepasst:
+    # im Zweifel fällt nur dieser Container (kontrollierter OOM-Restart), nicht der Server.
+    mem_limit: 768m
     networks:
       - appnet
       - hetzner-network
@@ -70,10 +70,11 @@ services:
     environment:
       PORT: 8000
     restart: unless-stopped
-    # MarkItDown/pdfminer lädt das komplette PDF in den RAM; sehr große Dokumente
-    # (tausende Seiten) können mehrere GB belegen. Limit deckelt den Verbrauch, damit
-    # ein Ausreißer den Host nicht mitreißt. Bei Bedarf für den IPCC-Report erhöhen.
-    mem_limit: 4g
+    # MarkItDown/pdfminer lädt das komplette PDF in den RAM. Cap an den kleinen,
+    # geteilten Prod-Host angepasst (3,7 GB total). ACHTUNG: reicht für kleine/mittlere
+    # PDFs, NICHT für tausende Seiten – solche Riesen-Docs sprengen diese Hardware
+    # unabhängig vom Cap und müssten vorab in Teile gesplittet werden.
+    mem_limit: 1g
     networks:
       - appnet
 
