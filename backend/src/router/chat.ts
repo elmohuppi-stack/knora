@@ -314,8 +314,14 @@ chatRouter.post("/stream", zValidator("json", chatSchema), async (c) => {
     stream: readable,
     headers: {
       "X-Session-Id": session.id,
-      "X-Sources": JSON.stringify(
-        searchResults.map((r) => ({ title: r.document_title, score: r.score })),
+      // encodeURIComponent, damit non-Latin-1-Zeichen (z.B. „ ") den HTTP-Header nicht sprengen
+      "X-Sources": encodeURIComponent(
+        JSON.stringify(
+          searchResults.map((r) => ({
+            title: r.document_title,
+            score: r.score,
+          })),
+        ),
       ),
     },
   });

@@ -41,8 +41,8 @@
             :class="['page-item', { active: selectedSlug === p.slug }]"
             @click="selectPage(p)"
           >
-            <div class="page-item-title">{{ p.title }}</div>
-            <div class="page-item-summary">{{ p.summary }}</div>
+            <div class="page-item-title">{{ stripWikiLinks(p.title) }}</div>
+            <div class="page-item-summary">{{ stripWikiLinks(p.summary) }}</div>
             <div class="page-item-meta">
               <span>{{ formatDate(p.updated_at) }}</span>
               <span v-if="p.out_links?.length">{{ p.out_links.length }} →</span>
@@ -80,7 +80,7 @@
           <button class="btn-back" @click="goBackToOverview">
             ← Übersicht
           </button>
-          <h2>{{ selectedPage.title }}</h2>
+          <h2>{{ stripWikiLinks(selectedPage.title) }}</h2>
           <div class="reader-meta">
             <span :class="['type-tag', selectedPage.page_type]">
               {{ typeLabel(selectedPage.page_type) }}
@@ -441,6 +441,16 @@ function renderWikiContent(content: string): string {
 
 function slugLabel(slug: string): string {
   return slug.split("/").pop()?.replace(/-/g, " ") || slug;
+}
+
+// Wiki-Link-Syntax [[slug|text]] in Titeln/Summaries zu reinem Anzeigetext auflösen
+function stripWikiLinks(text: string): string {
+  if (!text) return text;
+  return text.replace(
+    /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+    (_match: string, slug: string, label?: string) =>
+      label || slug.replace(/^.*\//, "").replace(/-/g, " "),
+  );
 }
 
 function typeLabel(type: string): string {

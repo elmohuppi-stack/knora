@@ -6,7 +6,7 @@
         class="back-link"
         >← Wiki-Übersicht</router-link
       >
-      <h3 v-if="!editing">{{ page?.title || "Lädt..." }}</h3>
+      <h3 v-if="!editing">{{ stripWikiLinks(page?.title || "") || "Lädt..." }}</h3>
       <div class="header-actions" v-if="page">
         <button class="btn-secondary" @click="editing = !editing">
           {{ editing ? "🔍 Vorschau" : "✏️ Bearbeiten" }}
@@ -51,7 +51,7 @@
     <!-- View Mode -->
     <div v-if="page && !editing" class="wiki-article">
       <div class="article-summary" v-if="page.summary">
-        {{ page.summary }}
+        {{ stripWikiLinks(page.summary) }}
       </div>
       <div class="article-content" v-html="renderedContent"></div>
       <div class="article-footer">
@@ -141,6 +141,16 @@ const renderedContent = computed(() => {
   const parsed = marked.parse(html, { async: false }) as string;
   return DOMPurify.sanitize(parsed);
 });
+
+// Wiki-Link-Syntax [[slug|text]] in Titeln/Summaries zu reinem Anzeigetext auflösen
+function stripWikiLinks(text: string): string {
+  if (!text) return text;
+  return text.replace(
+    /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+    (_match: string, slug: string, label?: string) =>
+      label || slug.split("/").pop()?.replace(/-/g, " ") || slug,
+  );
+}
 
 onMounted(async () => {
   if (!auth.isAuthenticated) {
