@@ -124,7 +124,9 @@ export const documents = pgTable("documents", {
 
 export const chunks = pgTable("chunks", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  document_id: varchar("document_id", { length: 36 }),
+  // 64 statt 36: Wiki-Chunks nutzen ein "wiki--<uuid>"-Präfix (42 Zeichen),
+  // das nicht in varchar(36) passt.
+  document_id: varchar("document_id", { length: 64 }),
   workspace_id: varchar("workspace_id", { length: 36 })
     .notNull()
     .references(() => workspaces.id),
