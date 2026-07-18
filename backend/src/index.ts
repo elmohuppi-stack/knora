@@ -64,9 +64,15 @@ app.route("/api/v1/activity", activityRouter);
 
 const port = parseInt(process.env.PORT || "3000");
 
-console.log(`🚀 Wiki-Chat API running on port ${port}`);
+// Bun-Default für maxRequestBodySize ist 128 MB – zu klein für große Dokument-
+// Uploads (z.B. mehrhundert-MB-PDFs). Über MAX_UPLOAD_MB konfigurierbar, Default
+// 512 MB. Muss zum client_max_body_size im nginx (frontend/nginx.conf) passen.
+const maxUploadMb = parseInt(process.env.MAX_UPLOAD_MB || "512");
+
+console.log(`🚀 Wiki-Chat API running on port ${port} (max upload ${maxUploadMb} MB)`);
 
 Bun.serve({
   port,
+  maxRequestBodySize: maxUploadMb * 1024 * 1024,
   fetch: app.fetch,
 });

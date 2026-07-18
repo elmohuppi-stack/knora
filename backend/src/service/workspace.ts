@@ -1,6 +1,6 @@
 import { db } from "../db/index.ts";
 import { workspaces, workspaceMembers } from "../db/schema.ts";
-import { eq, and, desc, like, or } from "drizzle-orm";
+import { eq, and, desc, like, or, sql } from "drizzle-orm";
 
 /** Generiert einen URL-freundlichen Slug aus einem Namen */
 export function slugify(name: string): string {
@@ -90,14 +90,20 @@ export async function updateWorkspace(
     description?: string;
     chunk_size?: number;
     chunk_overlap?: number;
+    wiki_depth?: string;
   },
 ) {
+  const { wiki_depth, ...rest } = data;
+  const setClause: Record<string, any> = { ...rest, updated_at: new Date() };
+  // wiki_depth in das bestehende wiki_config-JSONB mergen (übrige Keys erhalten).
+  if (wiki_depth !== undefined) {
+    setClause.wiki_config = sql`coalesce(${workspaces.wiki_config}, '{}'::jsonb) || ${JSON.stringify(
+      { wiki_depth },
+    )}::jsonb`;
+  }
   const [workspace] = await db
     .update(workspaces)
-    .set({
-      ...data,
-      updated_at: new Date(),
-    })
+    .set(setClause)
     .where(eq(workspaces.id, id))
     .returning();
   return workspace || null;

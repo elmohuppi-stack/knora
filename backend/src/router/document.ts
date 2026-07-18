@@ -132,10 +132,14 @@ async function processUploadedFile(
         new Blob([buffer]),
         fileName,
       );
+      // 60 s reichen für kleine Dateien, aber ein PDF mit tausenden Seiten braucht im
+      // Parser (MarkItDown) deutlich länger. Über PARSER_TIMEOUT_MS konfigurierbar,
+      // Default 30 min – muss ≤ dem gunicorn --timeout im Parser (parser/Dockerfile) liegen.
+      const parserTimeoutMs = parseInt(process.env.PARSER_TIMEOUT_MS || "1800000");
       const resp = await fetch(parserUrl, {
         method: "POST",
         body: formData,
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(parserTimeoutMs),
       });
       if (!resp.ok) {
         throw new Error(

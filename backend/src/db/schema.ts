@@ -70,6 +70,10 @@ export const workspaces = pgTable("workspaces", {
     wiki_language: "de",
     max_pages_per_ingest: 10,
     extraction_granularity: "standard",
+    // Wiki-Tiefe: "full" | "capped" | "summary" | "off". Steuert, wie viel Wiki bei
+    // großen Dokumenten erzeugt wird (Kosten/Zeit vs. Detailtiefe). Default "capped":
+    // Entity/Concept-Seiten gedeckelt + Auto-Summary bei sehr großen Docs.
+    wiki_depth: "capped",
   }),
   created_at: timestamp("created_at").defaultNow().notNull(),
   updated_at: timestamp("updated_at").defaultNow().notNull(),

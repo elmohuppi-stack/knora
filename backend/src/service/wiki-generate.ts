@@ -54,6 +54,29 @@ interface WikiResult {
   source_chunks?: string[];
 }
 
+interface Chapter {
+  title: string;
+  text: string;
+}
+
+// Zielgröße pro Kapitel in Zeichen (~10-15 Seiten) – das Fenster, das die
+// Summary-/Extraktions-Prompts zuverlässig als Ganzes verarbeiten. Über
+// WIKI_CHAPTER_CHARS konfigurierbar.
+const CHAPTER_CHARS = parseInt(process.env.WIKI_CHAPTER_CHARS || "32000");
+
+// Wiki-Tiefe-Steuerung (kombiniert Auto-Deckel + Summary-only in EINER Einstellung
+// wiki_config.wiki_depth). Harte Obergrenze für Entity/Concept-Seiten pro Import im
+// Modus "capped" – verhindert die Seiten-Explosion bei großen Dokumenten.
+const WIKI_MAX_PAGES_CEILING = parseInt(
+  process.env.WIKI_MAX_PAGES_CEILING || "120",
+);
+// Ab so vielen Kapiteln stuft der Default-Modus "capped" automatisch auf
+// summary-only herunter (nur Kapitel-Artikel, keine teuren Entity/Concept-Seiten),
+// um Stunden-Läufe/Kostenexplosion bei Riesen-Dokumenten zu vermeiden.
+const WIKI_SUMMARY_ONLY_CHAPTERS = parseInt(
+  process.env.WIKI_SUMMARY_ONLY_CHAPTERS || "25",
+);
+
 // ---------------------------------------------------------------------------
 // Hauptfunktion
 // ---------------------------------------------------------------------------
@@ -95,100 +118,165 @@ export async function generateWikiArticles(
   const granularity = ws?.wiki_config?.extraction_granularity || "standard";
   const maxPages = ws?.wiki_config?.max_pages_per_ingest || 10;
 
+  // Wiki-Tiefe: "full" (alles, kein Deckel) | "capped" (Entity/Concept-Seiten,
+  // gedeckelt + Auto-Summary bei sehr großen Docs) | "summary" (nur Kapitel-Artikel)
+  // | "off" (kein Wiki – Dokument ist trotzdem via Chat/RAG durchsuchbar).
+  // Default "capped": sinnvoll bounded ohne manuelles Konfigurieren.
+  const wikiDepth = ws?.wiki_config?.wiki_depth || "capped";
+  if (wikiDepth === "off") {
+    console.log(`[wiki-gen] ⏭️ wiki_depth="off" – Wiki-Generierung übersprungen`);
+    return null;
+  }
+
   // 4. Existierende Slugs laden (für Deduplizierung)
   const existingPages = await wikiService.listPages(workspaceId, {
     page_size: 500,
   });
   const existingSlugs = existingPages.pages.map((p) => p.slug);
 
-  // Content kürzen falls zu lang
-  const content =
-    doc.content.length > 32000
-      ? doc.content.slice(0, 32000) + "\n\n[...](gekürzt)"
-      : doc.content;
-
-  // =========================================================================
-  // SCHRITT 1: Kandidaten extrahieren (Entities + Concepts)
-  // =========================================================================
-  console.log(`[wiki-gen] 🔍 Schritt 1: Extrahiere Kandidaten...`);
-
-  const candidateSlugs = existingPages.pages
-    .filter((p) => p.page_type === "entity" || p.page_type === "concept")
-    .map((p) => `[[${p.slug}|${p.title}]]`);
-
-  const extractionJson = await callLLMJson<CombinedExtraction>(
-    provider,
-    WIKI_CANDIDATE_SLUG_PROMPT.replace("{{content}}", content)
-      .replace(/\{\{language\}\}/g, language)
-      .replace("{{previousSlugs}}", candidateSlugs.join("\n") || "Keine")
-      .replace("{{granularityGuidance}}", granularityGuidance(granularity)),
+  // Dokument in Kapitel (~CHAPTER_CHARS) zerlegen, damit das GANZE Dokument
+  // verarbeitet wird statt bei 32k Zeichen abgeschnitten. Kurze Dokumente ergeben
+  // genau ein Kapitel = bisheriges Verhalten.
+  const chapters = splitIntoChapters(doc.content, CHAPTER_CHARS);
+  const multiChapter = chapters.length > 1;
+  console.log(
+    `[wiki-gen] 📖 Dokument in ${chapters.length} Kapitel zerlegt (~${CHAPTER_CHARS} Zeichen/Kapitel)`,
   );
 
-  if (!extractionJson) {
-    console.log(`[wiki-gen] ⚠️ Keine Kandidaten extrahiert`);
-    return null;
+  // Effektive Tiefe: Im Default-Modus "capped" sehr große Dokumente automatisch auf
+  // summary-only herunterstufen. "full" bleibt bewusst unangetastet (Power-User).
+  let depth = wikiDepth;
+  if (depth === "capped" && chapters.length >= WIKI_SUMMARY_ONLY_CHAPTERS) {
+    depth = "summary";
+    console.log(
+      `[wiki-gen] ⚙️ ${chapters.length} Kapitel ≥ ${WIKI_SUMMARY_ONLY_CHAPTERS} → Auto-Summary-Modus (keine Entity/Concept-Seiten)`,
+    );
+  }
+  // Entity/Concept-Seiten nur in "full"/"capped"; "summary" erzeugt nur Kapitel.
+  const generatePages = depth === "full" || depth === "capped";
+
+  // Seiten-Budget pro Kapitel skalieren: "full" unbegrenzt (maxPages × Kapitel),
+  // "capped" zusätzlich hart gedeckelt gegen die Seiten-Explosion.
+  const effectiveMaxPages =
+    depth === "capped"
+      ? Math.min(WIKI_MAX_PAGES_CEILING, maxPages * chapters.length)
+      : maxPages * chapters.length;
+
+  console.log(`[wiki-gen] 🎚️ Wiki-Tiefe: ${depth} (konfiguriert: ${wikiDepth})`);
+
+  const previousSlugs = existingPages.pages
+    .filter((p) => p.page_type === "entity" || p.page_type === "concept")
+    .map((p) => `[[${p.slug}|${p.title}]]`)
+    .join("\n");
+
+  // =========================================================================
+  // SCHRITT 1: Kandidaten extrahieren (Entities + Concepts) – über ALLE Kapitel
+  // Im Summary-Modus übersprungen (keine Entity/Concept-Seiten → keine Extraktion
+  // nötig; spart bei großen Dokumenten die teuersten Zusatz-Calls).
+  // =========================================================================
+  const candidateMap = new Map<string, ExtractedItem>();
+  if (generatePages) {
+    console.log(
+      `[wiki-gen] 🔍 Schritt 1: Extrahiere Kandidaten aus ${chapters.length} Kapitel(n)...`,
+    );
+    for (let i = 0; i < chapters.length; i++) {
+      const extractionJson = await callLLMJson<CombinedExtraction>(
+        provider,
+        WIKI_CANDIDATE_SLUG_PROMPT.replace("{{content}}", chapters[i].text)
+          .replace(/\{\{language\}\}/g, language)
+          .replace("{{previousSlugs}}", previousSlugs || "Keine")
+          .replace("{{granularityGuidance}}", granularityGuidance(granularity)),
+      );
+      if (!extractionJson) continue;
+      for (const it of [
+        ...(extractionJson.entities || []),
+        ...(extractionJson.concepts || []),
+      ]) {
+        mergeCandidate(candidateMap, it);
+      }
+    }
+    console.log(
+      `[wiki-gen] ✅ ${candidateMap.size} Kandidaten (dedupliziert über alle Kapitel)`,
+    );
+  } else {
+    console.log(`[wiki-gen] ⏭️ Schritt 1 übersprungen (Summary-Modus)`);
   }
 
-  const entities = extractionJson.entities || [];
-  const concepts = extractionJson.concepts || [];
-  console.log(
-    `[wiki-gen] ✅ ${entities.length} Entities, ${concepts.length} Concepts gefunden`,
-  );
-
-  // =========================================================================
-  // SCHRITT 2: Summary-Artikel generieren
-  // =========================================================================
-  console.log(`[wiki-gen] 📝 Schritt 2: Generiere Summary-Artikel...`);
-
-  const allCandidates = [...entities, ...concepts];
+  const allCandidates = [...candidateMap.values()];
   const extractedSlugsText = allCandidates
     .map((e) => `  - [[${e.slug}|${e.name}]]`)
     .join("\n");
 
-  const summaryRaw = await callLLM(
-    provider,
-    WIKI_SUMMARY_PROMPT.replace("{{content}}", content)
-      .replace("{{language}}", language)
-      .replace("{{extractedSlugs}}", extractedSlugsText || "Keine"),
-  );
-
-  if (!summaryRaw) {
-    console.log(`[wiki-gen] ❌ Summary-Generierung fehlgeschlagen`);
-    return null;
-  }
-
-  // Summary parsen: "SUMMARY: ..." Zeile extrahieren
-  const summaryMatch = summaryRaw.match(/SUMMARY:\s*(.+)/im);
-  const summaryLine = summaryMatch ? summaryMatch[1].trim() : "";
-  let summaryContent = summaryRaw.replace(/SUMMARY:\s*.+(\r?\n|$)/i, "").trim();
-
-  const summaryTitleMatch = summaryContent.match(/^#\s+(.+)/m);
-  const summaryTitle = summaryTitleMatch
-    ? summaryTitleMatch[1].trim()
-    : doc.title;
-
+  // =========================================================================
+  // SCHRITT 2: Kapitel-Artikel generieren (+ Übersichtsseite bei mehreren Kapiteln)
+  // =========================================================================
   console.log(
-    `[wiki-gen] ✅ Summary: "${summaryTitle}" (${summaryContent.length} Zeichen)`,
+    `[wiki-gen] 📝 Schritt 2: Generiere ${chapters.length} Kapitel-Artikel...`,
   );
 
-  // Summary-Seite erstellen
-  const summarySlug = slugify(`summary-${doc.id}`);
-  let summaryPage;
-  const existingSummary = await wikiService.getPage(workspaceId, summarySlug);
-  if (existingSummary) {
-    summaryPage = await wikiService.updatePage(workspaceId, summarySlug, {
-      title: summaryTitle,
-      content: summaryContent,
+  const baseSlug = slugify(`summary-${doc.id}`);
+  const chapterSlugs: string[] = [];
+  const chapterLinks: string[] = [];
+  let summaryPage: any = null;
+
+  for (let i = 0; i < chapters.length; i++) {
+    const chapter = chapters[i];
+    const summaryRaw = await callLLM(
+      provider,
+      WIKI_SUMMARY_PROMPT.replace("{{content}}", chapter.text)
+        .replace("{{language}}", language)
+        .replace("{{extractedSlugs}}", extractedSlugsText || "Keine"),
+    );
+    if (!summaryRaw) {
+      console.log(`[wiki-gen] ⚠️ Kapitel ${i + 1}: Summary fehlgeschlagen`);
+      continue;
+    }
+
+    const sumMatch = summaryRaw.match(/SUMMARY:\s*(.+)/im);
+    const summaryLine = sumMatch ? sumMatch[1].trim() : "";
+    const body = summaryRaw.replace(/SUMMARY:\s*.+(\r?\n|$)/i, "").trim();
+    // Titel-Priorität: echte Dokument-Überschrift → vom LLM generierter Artikel-
+    // titel (# …) → generischer Fallback. So bekommen auch PDFs ohne Markdown-
+    // Überschriften aussagekräftige Kapitel-Titel statt "Kapitel N".
+    const titleMatch = body.match(/^#\s+(.+)/m);
+    const chapterTitle =
+      chapter.title ||
+      (titleMatch
+        ? titleMatch[1].trim()
+        : multiChapter
+          ? `${doc.title} – Teil ${i + 1}`
+          : doc.title);
+
+    // Bei mehreren Kapiteln eindeutiger Slug pro Kapitel; bei einem Kapitel der
+    // bisherige Summary-Slug (Rückwärtskompatibilität + sauberer Re-Import).
+    const chapterSlug = multiChapter ? `${baseSlug}-k${i + 1}` : baseSlug;
+
+    const page = await upsertPage(workspaceId, chapterSlug, {
+      title: chapterTitle,
+      content: body,
       summary: summaryLine,
       page_type: "summary",
+      source_document_id: docId,
     });
-  } else {
-    summaryPage = await wikiService.createPage({
-      workspace_id: workspaceId,
-      slug: summarySlug,
-      title: summaryTitle,
-      content: summaryContent,
-      summary: summaryLine,
+    chapterSlugs.push(chapterSlug);
+    chapterLinks.push(`- [[${chapterSlug}|${chapterTitle}]]`);
+    if (!summaryPage) summaryPage = page;
+    console.log(
+      `[wiki-gen] ✅ Kapitel ${i + 1}/${chapters.length}: "${chapterTitle}" (${body.length} Zeichen)`,
+    );
+  }
+
+  // Übersichtsseite mit Inhaltsverzeichnis (nur bei mehreren Kapiteln). Behält den
+  // Basis-Slug, sodass Verlinkungen auf "das Dokument" auf die Übersicht zeigen.
+  if (multiChapter) {
+    const overviewContent =
+      `# ${doc.title}\n\n` +
+      `Dieses Dokument ist in ${chapters.length} Kapitel gegliedert.\n\n` +
+      `## Kapitel\n\n${chapterLinks.join("\n")}`;
+    summaryPage = await upsertPage(workspaceId, baseSlug, {
+      title: doc.title,
+      content: overviewContent,
+      summary: `Übersicht über ${chapters.length} Kapitel aus „${doc.title}".`,
       page_type: "summary",
       source_document_id: docId,
     });
@@ -211,7 +299,14 @@ export async function generateWikiArticles(
     const candidateList = allCandidates
       .map((c) => `- ${c.slug}: ${c.name}`)
       .join("\n");
-    const batches = buildCitationBatches(sourceChunks, 12000);
+    // Kein Batch-Deckel: alle Chunks des Dokuments werden zitiert, damit auch
+    // Entitäten/Konzepte aus dem hinteren Teil des Dokuments echte Quell-Zitate
+    // erhalten (früher nur die ersten 4 Batches ≈ 48k Zeichen).
+    const batches = buildCitationBatches(
+      sourceChunks,
+      12000,
+      Number.MAX_SAFE_INTEGER,
+    );
 
     for (const batch of batches) {
       const chunksXml = batch
@@ -276,10 +371,10 @@ export async function generateWikiArticles(
       (citationsBySlug.get(b.slug)?.size || 0) -
       (citationsBySlug.get(a.slug)?.size || 0),
   );
-  const toProcess = prioritized.slice(0, maxPages);
-  if (prioritized.length > maxPages) {
+  const toProcess = prioritized.slice(0, effectiveMaxPages);
+  if (prioritized.length > effectiveMaxPages) {
     console.log(
-      `[wiki-gen] ⚠️ ${prioritized.length} Kandidaten, begrenze auf ${maxPages} (max_pages_per_ingest)`,
+      `[wiki-gen] ⚠️ ${prioritized.length} Kandidaten, begrenze auf ${effectiveMaxPages} (max_pages_per_ingest ${maxPages} × ${chapters.length} Kapitel)`,
     );
   }
 
@@ -356,8 +451,10 @@ export async function generateWikiArticles(
   // =========================================================================
   console.log(`[wiki-gen] 🔄 Schritt 5: Injiziere Cross-Links...`);
 
-  // Nur Seiten, die tatsächlich erstellt/aktualisiert wurden (verhindert tote Links)
-  const affectedSlugs = [summarySlug, ...toProcess.map((e) => e.slug)];
+  // Nur Seiten, die tatsächlich erstellt/aktualisiert wurden (verhindert tote Links).
+  // Die Übersichtsseite (baseSlug bei mehreren Kapiteln) bleibt bewusst außen vor –
+  // ihr Inhalt ist ein kontrolliertes Inhaltsverzeichnis, keine Fließtext-Seite.
+  const affectedSlugs = [...chapterSlugs, ...toProcess.map((e) => e.slug)];
 
   // Gültige Ziel-Slugs (für Dead-Link-Bereinigung) einmalig laden
   const allPages = await wikiService.listPages(workspaceId, { page_size: 1000 });
@@ -422,6 +519,167 @@ export async function generateWikiArticles(
 // ---------------------------------------------------------------------------
 // Hilfsfunktionen
 // ---------------------------------------------------------------------------
+
+/**
+ * Zerlegt langen Dokumenttext in Kapitel von je ~targetChars Zeichen. Bevorzugt
+ * Schnitte an Markdown-Überschriften (# / ## / ###) und packt aufeinanderfolgende
+ * Abschnitte bis zur Zielgröße; ohne Überschriften greift ein Größen-Fallback an
+ * Absatzgrenzen. Kurze Dokumente ergeben genau EIN Kapitel (= bisheriges Verhalten).
+ */
+function splitIntoChapters(content: string, targetChars: number): Chapter[] {
+  const text = content.trim();
+  if (text.length <= targetChars) {
+    return [{ title: "", text }];
+  }
+
+  const headingRe = /^#{1,3}\s+.+$/gm;
+  const matches = [...text.matchAll(headingRe)];
+
+  // Keine Überschriften: reiner Größen-Fallback an Absatzgrenzen. Titel bleibt leer
+  // – der Kapitel-Titel wird später aus dem LLM-generierten Artikel abgeleitet.
+  if (matches.length === 0) {
+    return packBySize(text, targetChars).map((t) => ({ title: "", text: t }));
+  }
+
+  // In Abschnitte zerlegen (jede Überschrift startet einen neuen Abschnitt).
+  const sections: { heading: string; body: string }[] = [];
+  const firstIdx = matches[0].index!;
+  if (firstIdx > 0) {
+    const pre = text.slice(0, firstIdx).trim();
+    if (pre) sections.push({ heading: "", body: pre });
+  }
+  for (let i = 0; i < matches.length; i++) {
+    const start = matches[i].index!;
+    const end = i + 1 < matches.length ? matches[i + 1].index! : text.length;
+    sections.push({
+      heading: matches[i][0].replace(/^#{1,3}\s+/, "").trim(),
+      body: text.slice(start, end),
+    });
+  }
+
+  // Abschnitte in Kapitel bis targetChars packen.
+  const chapters: Chapter[] = [];
+  let curText = "";
+  let curTitle = "";
+  const flush = () => {
+    if (curText.trim()) {
+      // Leerer Titel = keine echte Überschrift gefunden; wird später aus dem
+      // LLM-Artikel oder als "Titel – Teil N" abgeleitet.
+      chapters.push({ title: curTitle, text: curText.trim() });
+    }
+    curText = "";
+    curTitle = "";
+  };
+
+  for (const sec of sections) {
+    // Einzelabschnitt größer als das Fenster: hart nach Größe splitten.
+    if (sec.body.length > targetChars) {
+      flush();
+      const parts = packBySize(sec.body, targetChars);
+      parts.forEach((p, i) => {
+        chapters.push({
+          title: sec.heading
+            ? i === 0
+              ? sec.heading
+              : `${sec.heading} (Teil ${i + 1})`
+            : "",
+          text: p.trim(),
+        });
+      });
+      continue;
+    }
+    if (curText && curText.length + sec.body.length > targetChars) {
+      flush();
+    }
+    if (!curTitle && sec.heading) curTitle = sec.heading;
+    curText += (curText ? "\n\n" : "") + sec.body;
+  }
+  flush();
+  return chapters;
+}
+
+/** Packt Text an Absatzgrenzen (\n\n) in Stücke ≤ maxChars; harte Notbremse bei Übergröße. */
+function packBySize(text: string, maxChars: number): string[] {
+  const paras = text.split(/\n\n+/);
+  const out: string[] = [];
+  let cur = "";
+  for (const p of paras) {
+    if (p.length > maxChars) {
+      if (cur) {
+        out.push(cur);
+        cur = "";
+      }
+      for (let i = 0; i < p.length; i += maxChars) {
+        out.push(p.slice(i, i + maxChars));
+      }
+      continue;
+    }
+    if (cur && cur.length + p.length + 2 > maxChars) {
+      out.push(cur);
+      cur = "";
+    }
+    cur += (cur ? "\n\n" : "") + p;
+  }
+  if (cur.trim()) out.push(cur);
+  return out;
+}
+
+/** Führt einen extrahierten Kandidaten dedupliziert (per Slug) in die Sammlung ein. */
+function mergeCandidate(map: Map<string, ExtractedItem>, it: ExtractedItem) {
+  if (!it?.slug || !it?.name) return;
+  const ex = map.get(it.slug);
+  if (!ex) {
+    map.set(it.slug, {
+      name: it.name,
+      slug: it.slug,
+      aliases: it.aliases || [],
+      description: it.description || "",
+      details: it.details || "",
+    });
+    return;
+  }
+  ex.aliases = [...new Set([...(ex.aliases || []), ...(it.aliases || [])])];
+  // Längste Beschreibung/Details behalten (die Substanz kommt ohnehin aus den
+  // zitierten Chunks; description/details sind nur Startpunkt/Fallback).
+  if ((it.description || "").length > (ex.description || "").length) {
+    ex.description = it.description;
+  }
+  if ((it.details || "").length > (ex.details || "").length) {
+    ex.details = it.details;
+  }
+}
+
+/** Legt eine Wiki-Seite an oder aktualisiert sie, falls der Slug schon existiert. */
+async function upsertPage(
+  workspaceId: string,
+  slug: string,
+  data: {
+    title: string;
+    content: string;
+    summary: string;
+    page_type: string;
+    source_document_id?: string;
+  },
+) {
+  const existing = await wikiService.getPage(workspaceId, slug);
+  if (existing) {
+    return await wikiService.updatePage(workspaceId, slug, {
+      title: data.title,
+      content: data.content,
+      summary: data.summary,
+      page_type: data.page_type,
+    });
+  }
+  return await wikiService.createPage({
+    workspace_id: workspaceId,
+    slug,
+    title: data.title,
+    content: data.content,
+    summary: data.summary,
+    page_type: data.page_type,
+    source_document_id: data.source_document_id,
+  });
+}
 
 function buildPagePrompt(opts: {
   item: ExtractedItem;

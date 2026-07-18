@@ -22,6 +22,10 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    # Große Uploads werden mehrfach in den RAM kopiert (parseBody → arrayBuffer → Blob).
+    # Ohne Limit kann ein Riesen-Upload den Host-RAM sprengen; mit Limit fällt im
+    # Zweifel nur dieser Container (kontrollierter OOM-Restart), nicht der ganze Server.
+    mem_limit: 2g
     networks:
       - appnet
       - hetzner-network
@@ -58,13 +62,18 @@ services:
         aliases:
           - knora-db
 
-  # Parser nur bei Bedarf: docker compose --profile parser up -d
+  # Parser wird für PDF/DOCX/HTML-Import zwingend gebraucht und läuft daher immer mit
+  # (kein Profil-Gate mehr – sonst startet ihn `docker compose up -d --build` beim
+  # Deploy nicht und der Import bricht ab). PARSER_URL im app-Service zeigt auf parser:8000.
   parser:
     build: ./parser
-    profiles: ["parser"]
     environment:
       PORT: 8000
     restart: unless-stopped
+    # MarkItDown/pdfminer lädt das komplette PDF in den RAM; sehr große Dokumente
+    # (tausende Seiten) können mehrere GB belegen. Limit deckelt den Verbrauch, damit
+    # ein Ausreißer den Host nicht mitreißt. Bei Bedarf für den IPCC-Report erhöhen.
+    mem_limit: 4g
     networks:
       - appnet
 

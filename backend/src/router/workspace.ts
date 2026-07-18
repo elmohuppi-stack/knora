@@ -19,6 +19,8 @@ const updateSchema = z.object({
   description: z.string().optional(),
   chunk_size: z.number().min(128).max(4096).optional(),
   chunk_overlap: z.number().min(0).max(512).optional(),
+  // Wiki-Tiefe pro Workspace: steuert Kosten/Detailtiefe der Wiki-Generierung.
+  wiki_depth: z.enum(["full", "capped", "summary", "off"]).optional(),
 });
 
 const memberSchema = z.object({

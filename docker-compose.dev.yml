@@ -27,6 +27,8 @@ services:
     environment:
       PORT: 8000
     restart: unless-stopped
+    # Siehe docker-compose.yml: MarkItDown lädt große PDFs komplett in den RAM.
+    mem_limit: 4g
     networks:
       - devnet
 
