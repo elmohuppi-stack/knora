@@ -134,6 +134,11 @@ Anders als [WeKnora](https://github.com/Tencent/WeKnora) (Enterprise-Knowledge-B
 
 **🔥 Entscheidung: MVP nur Text/Markdown – später pdf.js → MarkItDown**
 
+> **Status: umgesetzt (v2).** Der **MarkItDown-Parser** (Python-MS) ist live und läuft
+> **immer** mit (kein Profil-Gate mehr), da PDF/DOCX/HTML-Import Kernfunktion ist. Für
+> große Dateien wurden Upload-Größe (nginx/Bun), Parser-Timeout (gunicorn/Backend) und
+> `mem_limit` angehoben. Details siehe README → „Große Dokumente & Wiki-Tiefe".
+
 ### 9. Task Queue
 
 | Technologie        | Vorteile                           | Nachteile                    | **Fazit**                |
@@ -143,6 +148,12 @@ Anders als [WeKnora](https://github.com/Tencent/WeKnora) (Enterprise-Knowledge-B
 | Redis + BullMQ     | Bewährt, persistent, Retry         | Redis nötig                  | ❌ Nicht im MVP          |
 
 **🔥 Entscheidung: Keine Queue im MVP** (inline-processing)
+
+> **Offen / nächster Schritt:** Der Import läuft aktuell als „fire-and-forget"-Task im
+> Backend-Prozess (nicht persistent). Bei sehr langen Importen (Riesen-Dokumente,
+> mehrstündige Wiki-Generierung im `full`-Modus) geht der Job bei einem Backend-Neustart
+> verloren. Ein **persistenter Job** (DB-Record + Resume beim Start) ist der empfohlene
+> nächste Ausbau, bevor tausend-Seiten-Dokumente in voller Tiefe importiert werden.
 
 ### 10. Wiki-Editor
 
@@ -397,11 +408,11 @@ services:
         aliases:
           - knora-db
 
-  # Parser nur bei Bedarf: docker compose --profile parser up -d
+  # Parser läuft immer mit (für PDF/DOCX/HTML-Import); mem_limit an Host-RAM angepasst
   parser:
     build: ./parser
-    profiles: ["parser"]
     env_file: .env
+    mem_limit: 1g
     restart: unless-stopped
     networks:
       - appnet
@@ -431,8 +442,9 @@ networks:
 | **Redis**          | ❌ Kein Redis im MVP                                      |
 | **LLM**            | Vercel AI SDK (✅ eingebaut)                              |
 | **Streaming**      | SSE via Vercel AI SDK (✅ implementiert)                  |
-| **Parser**         | MVP: Text/Markdown • v1: pdf.js • v2: MarkItDown optional |
-| **Task Queue**     | Keine (inline) – später Bun Worker                        |
+| **Parser**         | MarkItDown (PDF/DOCX/HTML), immer an (✅ live, Limits für große Dateien) |
+| **Task Queue**     | Keine (inline) – persistenter Job als nächster Schritt offen |
+| **Große Dokumente**| Kapitel-Wiki über das ganze Dokument + `wiki_depth` je Workspace (✅ umgesetzt) |
 | **Wiki-Editor**    | TipTap (✅ bereits in Dependencies)                       |
 | **Wiki-Graph**     | D3.js (✅ bereits in Dependencies)                        |
 | **File Storage**   | Lokales Filesystem (✅ bereits implementiert)             |

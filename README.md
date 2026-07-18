@@ -15,10 +15,11 @@ Stell Fragen via RAG-Chat **und** bekomme ein automatisch generiertes, verlinkte
 
 | Feature                 | Beschreibung                                         |
 | ----------------------- | ---------------------------------------------------- |
-| **📄 Dokument-Import**   | Markdown, Text, PDF, DOCX, HTML u.a. über den Parser-Service |
+| **📄 Dokument-Import**   | Markdown, Text, PDF, DOCX, HTML u.a. über den Parser-Service – auch **große Dateien** (Upload-/Timeout-/RAM-Limits angehoben) |
 | **🔍 Hybride Suche**     | Vektor-Embeddings (pgvector) + Volltext (tsvector)   |
 | **💬 RAG Chat**          | Frage zu deinen Dokumenten mit Quellenangaben, SSE-Streaming, Historie |
-| **📖 Wiki-Generierung**  | LLM erstellt Summary-/Entity-/Concept-Seiten aus Dokumenten |
+| **📖 Wiki-Generierung**  | LLM erstellt Summary-/Entity-/Concept-Seiten – **kapitelweise über das ganze Dokument** (nicht nur den Anfang) |
+| **🎚️ Wiki-Tiefe**        | Pro Workspace steuerbar (`full`/`capped`/`summary`/`off`) – Kosten vs. Detailtiefe bei großen Dokumenten |
 | **🔗 Verlinktes Wiki**   | `[[Slug]]`-Links zwischen Wiki-Seiten                |
 | **✏️ TipTap-Editor**     | WYSIWYG-Editor mit `[[slug]]`-Autocompletion         |
 | **🕸️ Wiki-Graph**        | D3.js Force-Directed Graph der Verlinkungen          |
@@ -170,7 +171,7 @@ knora/
 │       ├── chat.ts
 │       └── model.ts
 │
-├── parser/                   # MarkItDown (Python, optional)
+├── parser/                   # MarkItDown (Python) – für PDF/DOCX/HTML-Import, läuft immer mit
 │   ├── main.py
 │   └── Dockerfile
 │
@@ -200,6 +201,27 @@ It uses [[PostgreSQL]] for data storage and [[pgvector]] for embeddings.
 
 Der **TipTap-Editor** autocompleted `[[` zu allen existierenden Slugs.  
 Der **Wiki-Graph** visualisiert die Verlinkungen als Force-Directed Graph.
+
+---
+
+## 📚 Große Dokumente & Wiki-Tiefe
+
+Große Dokumente (viele hundert Seiten) und lange Video-Transkripte werden **vollständig** verarbeitet:
+
+- **Import-Limits angehoben**: nginx-Body-Size (512 MB), Bun-`maxRequestBodySize` (`MAX_UPLOAD_MB`), Parser-Timeout (`PARSER_TIMEOUT_MS`, gunicorn `--timeout`) und `mem_limit` für app/parser.
+- **Embeddings ohne Deckel**: alle Chunks werden embedded (früher stumme Grenze bei 5000) – gebatcht über `EMBED_BATCH_SIZE`.
+- **Kapitel-Wiki**: das Dokument wird in ~32k-Zeichen-Kapitel (an Überschriften, Größen-Fallback) zerlegt; Extraktion, Zusammenfassung und Zitate laufen über **alle** Kapitel plus eine Übersichtsseite mit Inhaltsverzeichnis.
+
+Die **Wiki-Tiefe** steuert das Kosten-/Detail-Verhältnis pro Workspace über `wiki_config.wiki_depth` (setzbar via `PUT /api/v1/workspaces/:id`):
+
+| Modus       | Verhalten                                                                       |
+| ----------- | ------------------------------------------------------------------------------- |
+| `full`      | Alle Entity/Concept-Seiten, kein Deckel                                          |
+| `capped` *(Default)* | Entity/Concept-Seiten gedeckelt + Auto-Zusammenfassung bei sehr großen Docs |
+| `summary`   | Nur Kapitel-Artikel + Übersicht (keine teuren Entity/Concept-Seiten)            |
+| `off`       | Kein Wiki – Dokument bleibt via Chat/RAG durchsuchbar                            |
+
+> Hinweis: Auf sehr kleiner Hardware (z. B. 4-GB-Host) sind tausend-Seiten-PDFs durch den Parser-RAM begrenzt und sollten vorab in Teile gesplittet werden.
 
 ---
 
@@ -270,9 +292,9 @@ Kurzfassung:
 
 ## 📋 Status
 
-Kernfunktionen sind implementiert und live: Auth, Workspaces, Dokument-Import (inkl. Parser für PDF/DOCX), hybride Suche, RAG-Chat mit Streaming & Historie, Wiki-Generierung (Summary/Entity/Concept), TipTap-Editor, Wiki-Graph, YouTube-Import und die WeKnora-Migration.
+Kernfunktionen sind implementiert und live: Auth, Workspaces, Dokument-Import (inkl. Parser für PDF/DOCX, auch große Dateien), hybride Suche, RAG-Chat mit Streaming & Historie, kapitelbasierte Wiki-Generierung über das ganze Dokument mit steuerbarer Wiki-Tiefe, TipTap-Editor, Wiki-Graph, YouTube-Import und die WeKnora-Migration.
 
-Offen / optional: URL-Scraping-Import, Knowledge-Graph-Pipeline (`graph_enabled`), Web-Suche.
+Offen / optional: `wiki_depth`-Auswahl im Frontend (aktuell via API), URL-Scraping-Import, Knowledge-Graph-Pipeline (`graph_enabled`), Web-Suche.
 
 Details & Architektur: [`docs/PLAN.md`](docs/PLAN.md)
 
