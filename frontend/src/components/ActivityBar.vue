@@ -55,6 +55,9 @@ const route = useRoute();
 const expanded = ref(false);
 const activities = ref<any[]>([]);
 let timer: ReturnType<typeof setInterval> | null = null;
+// Merkt sich, ob im vorherigen Poll bereits eine Aktivität lief, damit nur bei
+// der steigenden Flanke (Ruhe → Aktivität) automatisch aufgeklappt wird.
+let wasRunning = false;
 
 // Aktive Workspace-ID aus Route (oder gemerkter letzter Workspace).
 const workspaceId = computed(() => {
@@ -113,13 +116,17 @@ async function poll() {
       params: { workspace_id: ws, limit: 8 },
     });
     activities.value = res.data.logs || [];
-    // Bei laufender Aktivität automatisch aufklappen und schnell weiter pollen.
+    // Bei *neu* startender Aktivität einmalig aufklappen (steigende Flanke) und
+    // schnell weiter pollen. Ein manuelles Einklappen bleibt danach erhalten –
+    // sonst würde ein hängender „started"-Eintrag die Leiste bei jedem Poll
+    // wieder aufreißen.
     if (running.value) {
-      if (!expanded.value) expanded.value = true;
+      if (!wasRunning && !expanded.value) expanded.value = true;
       ensureFastPoll();
     } else {
       ensureSlowPoll();
     }
+    wasRunning = running.value;
   } catch {
     /* still bleiben – die Leiste soll nie die App stören */
   }

@@ -257,7 +257,13 @@ chatRouter.post("/stream", zValidator("json", chatSchema), async (c) => {
             score: r.score,
           })),
         })
-        .then()
+        .then(() =>
+          // Session-Zeitstempel für Recency-Sortierung der Historie aktualisieren
+          db
+            .update(chatSessions)
+            .set({ updated_at: new Date() })
+            .where(eq(chatSessions.id, session.id)),
+        )
         .catch(console.error);
     },
   });

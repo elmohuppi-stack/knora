@@ -139,46 +139,6 @@
       </table>
     </div>
 
-    <!-- Log-Akkordeon -->
-    <div class="log-accordion">
-      <button class="log-accordion-header" @click="showLogs = !showLogs">
-        <span class="log-accordion-title">
-          📋 Log-Meldungen
-          <span v-if="activities.length > 0" class="log-count">{{
-            activities.length
-          }}</span>
-        </span>
-        <span class="log-accordion-icon">{{ showLogs ? "▼" : "▶" }}</span>
-      </button>
-      <div v-if="showLogs" class="log-accordion-body">
-        <div v-if="activities.length === 0" class="log-empty">
-          Keine aktuellen Log-Meldungen.
-        </div>
-        <div
-          v-for="a in activities"
-          :key="a.id"
-          :class="['log-item', a.status]"
-        >
-          <span class="log-icon">{{
-            a.action === "youtube_import" ? "▶️" : "📖"
-          }}</span>
-          <span class="log-msg">{{ a.message }}</span>
-          <span class="log-status">
-            {{
-              a.status === "completed"
-                ? "✅"
-                : a.status === "failed"
-                  ? "❌"
-                  : "🔄"
-            }}
-          </span>
-          <span v-if="a.duration_ms" class="log-time"
-            >({{ (a.duration_ms / 1000).toFixed(1) }}s)</span
-          >
-        </div>
-      </div>
-    </div>
-
     <!-- Document Detail Dialog -->
     <div
       v-if="showDetail && selectedDoc"
@@ -363,8 +323,6 @@ const editDesc = ref("");
 const settingsError = ref("");
 
 // Live activity feed
-const activities = ref<any[]>([]);
-const showLogs = ref(false);
 let activityTimer: ReturnType<typeof setInterval> | null = null;
 
 // Document detail
@@ -384,12 +342,7 @@ function startActivityPoll() {
       const hasRunning = logs.some(
         (l: any) => l.status === "started" || l.status === "processing",
       );
-      // Accordion automatisch öffnen bei neuen/aktiven Logs
-      if (logs.length > 0 && hasRunning) {
-        showLogs.value = true;
-      }
-      activities.value = logs;
-      // Auto-refresh docs wenn Aktivitäten laufen
+      // Auto-refresh docs wenn Aktivitäten laufen (Logs zeigt die ActivityBar)
       if (hasRunning) {
         await loadDocs();
       } else {
@@ -465,6 +418,11 @@ onMounted(async () => {
       return;
     }
     workspaceId.value = resolved.id;
+  }
+
+  // Zuletzt verwendeten Workspace merken (für Chat-Default)
+  if (workspaceId.value) {
+    localStorage.setItem("lastWorkspaceId", workspaceId.value);
   }
 
   await Promise.all([loadDocs(), loadWorkspace()]);
@@ -673,87 +631,6 @@ function formatDate(dateStr: string) {
 }
 .log-link:hover {
   color: var(--color-primary);
-}
-
-/* Log-Akkordeon */
-.log-accordion {
-  margin: 0.5rem 1.5rem 1rem;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.log-accordion-header {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.6rem 1rem;
-  background: var(--color-bg-secondary);
-  border: none;
-  cursor: pointer;
-  font-size: 0.875rem;
-  color: var(--color-text);
-  transition: background 0.15s;
-}
-.log-accordion-header:hover {
-  background: var(--color-border);
-}
-.log-accordion-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-weight: 600;
-}
-.log-count {
-  background: var(--color-primary);
-  color: #fff;
-  font-size: 0.7rem;
-  font-weight: 700;
-  padding: 0.1rem 0.45rem;
-  border-radius: 10px;
-  line-height: 1.3;
-}
-.log-accordion-icon {
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-}
-.log-accordion-body {
-  padding: 0.5rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  background: var(--color-bg);
-  border-top: 1px solid var(--color-border);
-}
-.log-empty {
-  color: var(--color-text-secondary);
-  font-size: 0.8rem;
-  padding: 0.5rem 0;
-  text-align: center;
-}
-.log-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8rem;
-  padding: 0.25rem 0;
-}
-.log-item.failed {
-  color: #e74c3c;
-}
-.log-icon {
-  flex-shrink: 0;
-}
-.log-msg {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.log-time {
-  color: var(--color-text-secondary);
-  font-size: 0.75rem;
-  flex-shrink: 0;
 }
 
 .back-link {
