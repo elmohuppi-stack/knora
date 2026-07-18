@@ -317,7 +317,7 @@ async function scheduleWikiGeneration(
     if (result) {
       await updateLog(logId, {
         status: "completed",
-        message: `Wiki-Seiten erstellt: Summary + ${result.entities} Entities + ${result.concepts} Concepts`,
+        message: `Wiki-Seiten erstellt/aktualisiert: Summary + ${result.entities} Entities + ${result.concepts} Concepts`,
         details: {
           document_id: docId,
           summary_id: result.summary?.id,

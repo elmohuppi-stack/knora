@@ -23,6 +23,8 @@ import {
   WIKI_PAGE_MODIFY_PROMPT,
   WIKI_DEDUP_PROMPT,
   WIKI_INDEX_INTRO_PROMPT,
+  WIKI_CHUNK_CITATION_PROMPT,
+  granularityGuidance,
 } from "./wiki-prompts.ts";
 import * as wikiService from "./wiki.ts";
 
@@ -90,6 +92,8 @@ export async function generateWikiArticles(
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
   const language = ws?.wiki_config?.wiki_language || "de";
+  const granularity = ws?.wiki_config?.extraction_granularity || "standard";
+  const maxPages = ws?.wiki_config?.max_pages_per_ingest || 10;
 
   // 4. Existierende Slugs laden (für Deduplizierung)
   const existingPages = await wikiService.listPages(workspaceId, {
@@ -115,8 +119,9 @@ export async function generateWikiArticles(
   const extractionJson = await callLLMJson<CombinedExtraction>(
     provider,
     WIKI_CANDIDATE_SLUG_PROMPT.replace("{{content}}", content)
-      .replace("{{language}}", language)
-      .replace("{{previousSlugs}}", candidateSlugs.join("\n") || "Keine"),
+      .replace(/\{\{language\}\}/g, language)
+      .replace("{{previousSlugs}}", candidateSlugs.join("\n") || "Keine")
+      .replace("{{granularityGuidance}}", granularityGuidance(granularity)),
   );
 
   if (!extractionJson) {
@@ -190,117 +195,195 @@ export async function generateWikiArticles(
   }
 
   // =========================================================================
-  // SCHRITT 3: Entity/Concept-Seiten anlegen/updaten (Reduce)
+  // SCHRITT 3: Chunk-Citation – ordne jedem Kandidaten seine Quell-Chunks zu
   // =========================================================================
-  console.log(`[wiki-gen] 🔗 Schritt 3: Entity/Concept-Seiten reduzieren...`);
+  console.log(`[wiki-gen] 📎 Schritt 3: Chunk-Citation...`);
+
+  // Quell-Chunks des Dokuments laden (chunk_index-Reihenfolge, globale [cNNN]-Labels)
+  const sourceChunks = await loadSourceChunks(docId);
+  const chunkByLabel = new Map<string, { id: string; content: string }>();
+  sourceChunks.forEach((c) => chunkByLabel.set(c.label, c));
+
+  // Aggregierte Zuordnung: slug -> Set<label>
+  const citationsBySlug = new Map<string, Set<string>>();
+
+  if (sourceChunks.length > 0 && allCandidates.length > 0) {
+    const candidateList = allCandidates
+      .map((c) => `- ${c.slug}: ${c.name}`)
+      .join("\n");
+    const batches = buildCitationBatches(sourceChunks, 12000);
+
+    for (const batch of batches) {
+      const chunksXml = batch
+        .map((c) => `<c id="${c.label}">\n${c.content}\n</c>`)
+        .join("\n");
+      const citeJson = await callLLMJson<CitationResult>(
+        provider,
+        WIKI_CHUNK_CITATION_PROMPT.replace("{{candidateSlugs}}", candidateList)
+          .replace("{{chunksXml}}", chunksXml)
+          .replace(/\{\{language\}\}/g, language),
+      );
+      if (!citeJson) continue;
+
+      // Zitate übernehmen
+      for (const [slug, labels] of Object.entries(citeJson.citations || {})) {
+        if (!Array.isArray(labels)) continue;
+        const set = citationsBySlug.get(slug) || new Set<string>();
+        labels.forEach((l) => {
+          if (chunkByLabel.has(l)) set.add(l);
+        });
+        citationsBySlug.set(slug, set);
+      }
+
+      // Neu entdeckte Slugs aufnehmen (Nachentdeckung fehlender Konzepte)
+      for (const ns of citeJson.new_slugs || []) {
+        if (!ns?.slug || !ns?.name) continue;
+        if (allCandidates.some((c) => c.slug === ns.slug)) continue;
+        allCandidates.push({
+          name: ns.name,
+          slug: ns.slug,
+          aliases: ns.aliases || [],
+          description: ns.description || "",
+          details: ns.details || "",
+        });
+        const set = citationsBySlug.get(ns.slug) || new Set<string>();
+        (ns.source_chunks || []).forEach((l) => {
+          if (chunkByLabel.has(l)) set.add(l);
+        });
+        citationsBySlug.set(ns.slug, set);
+      }
+    }
+  }
+
+  const citedCount = [...citationsBySlug.values()].filter(
+    (s) => s.size > 0,
+  ).length;
+  console.log(
+    `[wiki-gen] ✅ ${citedCount}/${allCandidates.length} Kandidaten mit Chunk-Zitaten`,
+  );
+
+  // =========================================================================
+  // SCHRITT 4: Entity/Concept-Seiten kompilieren (Reduce, per LLM)
+  // =========================================================================
+  console.log(`[wiki-gen] 🔗 Schritt 4: Entity/Concept-Seiten kompilieren...`);
 
   let entityCount = 0;
   let conceptCount = 0;
 
-  for (const item of allCandidates) {
+  // Kandidaten mit den meisten Zitaten zuerst, auf maxPages begrenzen
+  const prioritized = [...allCandidates].sort(
+    (a, b) =>
+      (citationsBySlug.get(b.slug)?.size || 0) -
+      (citationsBySlug.get(a.slug)?.size || 0),
+  );
+  const toProcess = prioritized.slice(0, maxPages);
+  if (prioritized.length > maxPages) {
+    console.log(
+      `[wiki-gen] ⚠️ ${prioritized.length} Kandidaten, begrenze auf ${maxPages} (max_pages_per_ingest)`,
+    );
+  }
+
+  for (const item of toProcess) {
     const existing = await wikiService.getPage(workspaceId, item.slug);
 
-    if (existing) {
-      // Bestehende Seite mit neuen Infos mergen
-      const mergePrompt = buildMergePrompt(
-        existing,
-        item,
-        summaryContent,
-        language,
-        existingSlugs,
-      );
-      const mergedRaw = await callLLM(provider, mergePrompt);
-      if (mergedRaw) {
-        const mergedSummary = mergedRaw.match(/SUMMARY:\s*(.+)/im);
-        const mergedContent = mergedRaw
-          .replace(/SUMMARY:\s*.+(\r?\n|$)/i, "")
-          .trim();
-        await wikiService.updatePage(workspaceId, item.slug, {
-          title: existing.title,
-          content: mergedContent,
-          summary: mergedSummary?.[1]?.trim() || item.description,
-          page_type: item.slug.startsWith("entity/") ? "entity" : "concept",
-        });
-      }
+    // <new_information> aus zitierten Chunks (wörtlich) bauen; Fallback: details
+    const labels = [...(citationsBySlug.get(item.slug) || [])];
+    const citedIds: string[] = [];
+    let newInfo: string;
+    if (labels.length > 0) {
+      newInfo =
+        `**${item.name}**: ${item.description}\n\n` +
+        labels
+          .map((l) => {
+            const c = chunkByLabel.get(l)!;
+            citedIds.push(c.id);
+            return `[${l}] ${c.content}`;
+          })
+          .join("\n\n");
     } else {
-      // Neue Seite erstellen
-      const pageContent = `# ${item.name}\n\n${item.details}\n\n## Quellen\n- [[${summarySlug}|${summaryTitle}]]`;
+      // Kein Zitat gefunden – Fallback auf Kurzbeschreibung + Details
+      newInfo = `**${item.name}**: ${item.description}\n\n${item.details}`;
+    }
+
+    const pagePrompt = buildPagePrompt({
+      item,
+      existingContent: existing?.content || "(Neue Seite)",
+      newInformation: newInfo,
+      language,
+      availableSlugs: existingSlugs,
+    });
+    const raw = await callLLM(provider, pagePrompt);
+    if (!raw) continue;
+
+    const sumMatch = raw.match(/SUMMARY:\s*(.+)/im);
+    const body = raw.replace(/SUMMARY:\s*.+(\r?\n|$)/i, "").trim();
+    const pageType = item.slug.startsWith("entity/") ? "entity" : "concept";
+
+    if (existing) {
+      await wikiService.updatePage(workspaceId, item.slug, {
+        title: existing.title,
+        content: body,
+        summary: sumMatch?.[1]?.trim() || item.description,
+        page_type: pageType,
+      });
+      await mergeChunkRefs(existing.id, citedIds);
+    } else {
       const page = await wikiService.createPage({
         workspace_id: workspaceId,
         slug: item.slug,
         title: item.name,
-        content: pageContent,
-        summary: item.description,
-        page_type: item.slug.startsWith("entity/") ? "entity" : "concept",
+        content: body,
+        summary: sumMatch?.[1]?.trim() || item.description,
+        page_type: pageType,
         source_document_id: docId,
       });
-
-      // Aliases setzen
-      if (item.aliases?.length > 0) {
-        await db
-          .update(wikiPages)
-          .set({ aliases: item.aliases })
-          .where(eq(wikiPages.id, page.id));
+      const patch: Record<string, any> = {};
+      if (item.aliases?.length > 0) patch.aliases = item.aliases;
+      if (citedIds.length > 0) patch.chunk_refs = [...new Set(citedIds)];
+      if (Object.keys(patch).length > 0) {
+        await db.update(wikiPages).set(patch).where(eq(wikiPages.id, page.id));
       }
-
-      if (item.slug.startsWith("entity/")) entityCount++;
-      else conceptCount++;
     }
+
+    // Zählt erstellte UND aktualisierte Seiten (Slugs sind workspace-global,
+    // bei Re-Import laufen bestehende Seiten über den Merge-Zweig)
+    if (pageType === "entity") entityCount++;
+    else conceptCount++;
   }
 
   // =========================================================================
-  // SCHRITT 4: Cross-Links injizieren
+  // SCHRITT 5: Cross-Links injizieren
   // =========================================================================
-  console.log(`[wiki-gen] 🔄 Schritt 4: Injiziere Cross-Links...`);
+  console.log(`[wiki-gen] 🔄 Schritt 5: Injiziere Cross-Links...`);
 
-  // Alle betroffenen Slugs = Summary + neue Entities/Concepts
-  const affectedSlugs = [summarySlug, ...allCandidates.map((e) => e.slug)];
+  // Nur Seiten, die tatsächlich erstellt/aktualisiert wurden (verhindert tote Links)
+  const affectedSlugs = [summarySlug, ...toProcess.map((e) => e.slug)];
 
-  // Für jede betroffene Seite: Links von anderen Seiten einfügen
+  // Gültige Ziel-Slugs (für Dead-Link-Bereinigung) einmalig laden
+  const allPages = await wikiService.listPages(workspaceId, { page_size: 1000 });
+  const validSlugSet = new Set(allPages.pages.map((p) => p.slug));
+
+  // Für jede betroffene Seite: Links von anderen Seiten einfügen + tote Links entfernen
   for (const slug of affectedSlugs) {
     const page = await wikiService.getPage(workspaceId, slug);
     if (!page || !page.content) continue;
 
-    const refs = allCandidates
+    const refs = toProcess
       .filter((c) => c.slug !== slug) // nicht auf sich selbst verlinken
       .map((c) => ({ slug: c.slug, matchText: c.name }));
 
-    let changed = false;
-    let newContent = page.content;
+    let newContent = injectCrossLinks(page.content, refs);
+    newContent = stripDeadLinks(newContent, validSlugSet);
 
-    for (const ref of refs) {
-      // Einfache Link-Injection: erstes Vorkommen des Namens durch [[slug|name]] ersetzen
-      const linkSyntax = `[[${ref.slug}|${ref.matchText}]]`;
-      if (newContent.includes(linkSyntax)) continue;
-      if (newContent.includes(`[[${ref.slug}]]`)) continue;
-
-      const idx = newContent.indexOf(ref.matchText);
-      if (idx >= 0) {
-        // Prüfen ob bereits in einem [[...]] oder Code-Block
-        const before = newContent.slice(Math.max(0, idx - 2), idx);
-        const after = newContent.slice(
-          idx + ref.matchText.length,
-          idx + ref.matchText.length + 2,
-        );
-        if (!before.includes("[[") && !after.includes("]]")) {
-          newContent =
-            newContent.slice(0, idx) +
-            linkSyntax +
-            newContent.slice(idx + ref.matchText.length);
-          changed = true;
-        }
-      }
-    }
-
-    if (changed) {
+    if (newContent !== page.content) {
       await wikiService.updatePage(workspaceId, slug, { content: newContent });
     }
   }
 
   // =========================================================================
-  // SCHRITT 5: Index-Intro aktualisieren
+  // SCHRITT 6: Index-Intro aktualisieren
   // =========================================================================
-  console.log(`[wiki-gen] 📋 Schritt 5: Aktualisiere Index-Intro...`);
+  console.log(`[wiki-gen] 📋 Schritt 6: Aktualisiere Index-Intro...`);
 
   const indexPage = await wikiService.getPage(workspaceId, "index");
   if (!indexPage || !indexPage.content) {
@@ -317,6 +400,16 @@ export async function generateWikiArticles(
     });
   }
 
+  // Neu erzeugte Wiki-Chunks embedden, damit sie in der Vektorsuche (Chat-RAG)
+  // auffindbar sind (nicht-blockierend – hält den Wiki-Gen-Response nicht auf).
+  import("./embedding.ts")
+    .then(({ embedWorkspaceChunks }) =>
+      embedWorkspaceChunks(workspaceId).then((r) =>
+        console.log(`[wiki-gen] 🧠 ${r.processed} Wiki-Chunks embedded`),
+      ),
+    )
+    .catch((e) => console.warn(`[wiki-gen] Embedding-Trigger fehlgeschlagen:`, e));
+
   console.log(`[wiki-gen] ========== ENDE (${Date.now() - t0}ms) ==========`);
 
   return {
@@ -330,38 +423,189 @@ export async function generateWikiArticles(
 // Hilfsfunktionen
 // ---------------------------------------------------------------------------
 
-function buildMergePrompt(
-  existing: any,
-  item: ExtractedItem,
-  summaryContent: string,
-  language: string,
-  existingSlugs: string[],
-): string {
-  const availableSlugs = [...existingSlugs, item.slug]
+function buildPagePrompt(opts: {
+  item: ExtractedItem;
+  existingContent: string;
+  newInformation: string;
+  language: string;
+  availableSlugs: string[];
+}): string {
+  const { item, existingContent, newInformation, language, availableSlugs } =
+    opts;
+  const pageType = item.slug.startsWith("entity/") ? "Entität" : "Konzept";
+  const validLinks = [...new Set(availableSlugs)]
+    .filter((s) => s !== item.slug) // Seite verlinkt nicht auf sich selbst
     .map((s) => `[[${s}]]`)
     .join("\n");
 
-  return WIKI_PAGE_MODIFY_PROMPT.replace("{{pageSlug}}", item.slug)
-    .replace("{{pageTitle}}", item.name)
-    .replace(
-      "{{pageType}}",
-      item.slug.startsWith("entity/") ? "Entität" : "Konzept",
-    )
+  return WIKI_PAGE_MODIFY_PROMPT.replace(/\{\{pageSlug\}\}/g, item.slug)
+    .replace(/\{\{pageTitle\}\}/g, item.name)
+    .replace(/\{\{pageType\}\}/g, pageType)
     .replace("{{pageAliases}}", (item.aliases || []).join(", "))
-    .replace("{{existingContent}}", existing.content || "")
-    .replace("{{availableSlugs}}", availableSlugs)
-    .replace("{{language}}", language)
+    .replace("{{existingContent}}", existingContent)
+    .replace("{{availableSlugs}}", validLinks || "Keine")
+    .replace(/\{\{language\}\}/g, language)
     .replace(
       "{{additionsSection}}",
-      `\n<new_information>\n${summaryContent}\n</new_information>\n`,
+      `<new_information>\n${newInformation}\n</new_information>`,
     )
     .replace("{{retractionsSection}}", "")
     .replace("{{retractionInstructions}}", "")
     .replace(
       "{{additionInstructions}}",
-      `3. FÜGE die Fakten aus <new_information> in die Seite ein, wenn sie über ${item.name} handeln.\n`,
+      `2. KOMPILIERE die Fakten aus <new_information> zu einem vollständigen, gut gegliederten Artikel über ${item.name}. Verarbeite JEDEN [cNNN]-Chunk und behalte die [cNNN]-Zitate bei.\n3. Erhalte bestehende, weiterhin gültige Informationen über ${item.name}.`,
     )
     .replace("{{emptyPageInstruction}}", "");
+}
+
+// ---------------------------------------------------------------------------
+// Chunk-Citation-Helfer
+// ---------------------------------------------------------------------------
+
+interface CitationNewSlug {
+  type?: string;
+  name: string;
+  slug: string;
+  aliases?: string[];
+  description?: string;
+  details?: string;
+  source_chunks?: string[];
+}
+
+interface CitationResult {
+  citations: Record<string, string[]>;
+  new_slugs: CitationNewSlug[];
+}
+
+/** Lädt die Quell-Chunks eines Dokuments und vergibt stabile [cNNN]-Labels. */
+async function loadSourceChunks(
+  docId: string,
+): Promise<{ id: string; content: string; label: string }[]> {
+  const rows = await db
+    .select({
+      id: chunks.id,
+      content: chunks.content,
+      idx: chunks.chunk_index,
+    })
+    .from(chunks)
+    .where(eq(chunks.document_id, docId))
+    .orderBy(chunks.chunk_index);
+
+  return rows.map((r, i) => ({
+    id: r.id,
+    content: r.content,
+    label: `c${String(i + 1).padStart(3, "0")}`,
+  }));
+}
+
+/** Packt Chunks in Batches (≤ maxChars), begrenzt auf maxBatches LLM-Aufrufe. */
+function buildCitationBatches(
+  chunkList: { id: string; content: string; label: string }[],
+  maxChars: number,
+  maxBatches = 4,
+): { id: string; content: string; label: string }[][] {
+  const batches: { id: string; content: string; label: string }[][] = [];
+  let current: { id: string; content: string; label: string }[] = [];
+  let size = 0;
+
+  for (const c of chunkList) {
+    if (current.length > 0 && size + c.content.length > maxChars) {
+      batches.push(current);
+      if (batches.length >= maxBatches) return batches;
+      current = [];
+      size = 0;
+    }
+    current.push(c);
+    size += c.content.length;
+  }
+  if (current.length > 0 && batches.length < maxBatches) batches.push(current);
+  return batches;
+}
+
+/** Führt neue Chunk-Referenzen dedupliziert in die bestehende Seite ein. */
+async function mergeChunkRefs(pageId: string, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const [row] = await db
+    .select({ chunk_refs: wikiPages.chunk_refs })
+    .from(wikiPages)
+    .where(eq(wikiPages.id, pageId))
+    .limit(1);
+  const existing = (row?.chunk_refs as string[]) || [];
+  const merged = [...new Set([...existing, ...ids])];
+  await db
+    .update(wikiPages)
+    .set({ chunk_refs: merged })
+    .where(eq(wikiPages.id, pageId));
+}
+
+// ---------------------------------------------------------------------------
+// Cross-Link-Helfer
+// ---------------------------------------------------------------------------
+
+const WORD_CHAR = /[\p{L}\p{N}_]/u;
+
+/**
+ * Injiziert [[slug|name]]-Links für das erste sichere Vorkommen jedes Kandidaten.
+ * Sicher = nicht innerhalb eines bestehenden [[...]]-Links und an Wortgrenzen.
+ * Ein Slug, der bereits (mit beliebigem Anzeigetext) verlinkt ist, wird
+ * übersprungen – das verhindert verschachtelte/doppelte Links.
+ */
+function injectCrossLinks(
+  content: string,
+  refs: { slug: string; matchText: string }[],
+): string {
+  let out = content;
+
+  for (const ref of refs) {
+    if (!ref.matchText) continue;
+    // Slug schon irgendwo verlinkt? (egal mit welchem Anzeigetext) -> überspringen
+    if (out.includes(`[[${ref.slug}|`) || out.includes(`[[${ref.slug}]]`)) {
+      continue;
+    }
+
+    // Geschützte Bereiche: bestehende [[...]]-Links
+    const spans: Array<[number, number]> = [];
+    const linkRe = /\[\[[^\]]*\]\]/g;
+    let m: RegExpExecArray | null;
+    while ((m = linkRe.exec(out)) !== null) {
+      spans.push([m.index, m.index + m[0].length]);
+    }
+
+    // Erstes Vorkommen außerhalb geschützter Bereiche + an Wortgrenzen finden
+    let from = 0;
+    while (true) {
+      const idx = out.indexOf(ref.matchText, from);
+      if (idx < 0) break;
+      const end = idx + ref.matchText.length;
+
+      const inSpan = spans.some(([s, e]) => idx < e && end > s);
+      const beforeChar = idx > 0 ? out[idx - 1] : "";
+      const afterChar = end < out.length ? out[end] : "";
+      const boundaryOk = !WORD_CHAR.test(beforeChar) && !WORD_CHAR.test(afterChar);
+
+      if (!inSpan && boundaryOk) {
+        out = out.slice(0, idx) + `[[${ref.slug}|${ref.matchText}]]` + out.slice(end);
+        break;
+      }
+      from = idx + 1;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Entfernt [[slug|name]]- und [[slug]]-Links, deren Ziel-Seite nicht existiert,
+ * und ersetzt sie durch den reinen Anzeigetext.
+ */
+function stripDeadLinks(content: string, validSlugs: Set<string>): string {
+  return content.replace(
+    /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+    (match, slug: string, text?: string) => {
+      if (validSlugs.has(slug.trim())) return match;
+      return text || slug.split("/").pop() || slug;
+    },
+  );
 }
 
 function slugify(text: string): string {

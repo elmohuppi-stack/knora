@@ -25,6 +25,8 @@ Gib ein JSON-Objekt mit zwei Arrays zurück: "entities" und "concepts".
 
 Falls das <content>-Feld oben leer ist oder keine substanziellen Informationen enthält, gib {"entities": [], "concepts": []} zurück. Erfinde KEINE Entitäten oder Konzepte.
 
+{{granularityGuidance}}
+
 ### Slug-Kontinuitätsregeln
 Falls bereits Slugs aus einer vorherigen Extraktion vorhanden sind:
 - Wenn eine Entität oder ein Konzept aus der vorherigen Extraktion noch im aktuellen Dokument vorkommt, **verwende den exakten Slug** aus der vorherigen Liste wieder.
@@ -39,7 +41,7 @@ Jede Entität sollte haben:
 - "description": **Index-Zusammenfassung** – ein Satz, 15-40 Wörter, in {{language}}. Beschreibt WAS diese Entität IST und ihre Rolle im Dokument.
 - "details": Kurze 1-3 Satz-Zusammenfassung in {{language}} als Fallback.
 
-Nur Entitäten aufnehmen, die substanziell diskutiert werden (mindestens zweimal erwähnt oder detailliert beschrieben).
+Wende die Extraktions-Umfang-Regeln oben an. Befördere niemals nur beiläufig erwähnte Namen zu Entitäten.
 
 ### Konzepte (Themen, Methoden, Theorien)
 Jedes Konzept sollte haben:
@@ -49,7 +51,7 @@ Jedes Konzept sollte haben:
 - "description": **Index-Zusammenfassung** – ein Satz, 15-40 Wörter, in {{language}}. Definiert WAS dieses Konzept IST.
 - "details": Kurze 1-3 Satz-Erklärung in {{language}} als Fallback.
 
-Nur Konzepte aufnehmen, die substanziell diskutiert werden.
+Wende die Extraktions-Umfang-Regeln oben an. Überspringe Konzepte, die nur namentlich erwähnt, aber nicht diskutiert werden.
 
 ### JSON-Formatierungsregeln
 - **KRITISCH**: Verwende KEINE literal line breaks in JSON-String-Werten. Verwende stattdessen \\n.
@@ -111,7 +113,14 @@ Gib zuerst die SUMMARY-Zeile aus, dann den Markdown-Inhalt. Keine anderen Vorbem
 // ---------------------------------------------------------------------------
 // Entity/Concept-Seite aktualisieren oder neu erstellen
 // ---------------------------------------------------------------------------
-export const WIKI_PAGE_MODIFY_PROMPT = `Du bist ein Wiki-Redakteur, der eine bestehende Wiki-Seite aktualisieren muss. Du verarbeitest NEUE Informationen, die hinzugefügt werden müssen, UND/ODER gelöschte Dokumente, deren exklusive Beiträge entfernt werden müssen.
+export const WIKI_PAGE_MODIFY_PROMPT = `Du bist ein Wiki-Redakteur, der eine Wiki-Seite erstellt oder aktualisiert. Du bist ein KOMPILIERER, kein freier Autor: Du verdichtest die gelieferten Quell-Chunks zu einem vollständigen, gut gegliederten Artikel – ohne Fakten zu erfinden und ohne welche wegzulassen.
+
+### Zitat- und Kompilierungs-Regeln (KRITISCH):
+- **Alle Fakten verwenden**: Der <new_information>-Block enthält WÖRTLICHE Quell-Chunks, jeder mit einem [cNNN]-Label. Verarbeite JEDEN gelieferten Chunk. Aus vielen Chunks entsteht ein langer, detaillierter Artikel – kürze NICHT auf ein bis zwei Sätze zusammen.
+- **Nah am Original**: Nutze die Formulierungen der Quelle. Du darfst umordnen, entdoppeln und verwandte Sätze verbinden, aber erfinde keine Übergänge und blähe kurze Aussagen nicht mit Floskeln auf.
+- **Nachverfolgbarkeit**: Versieh jede Tatsachenbehauptung, Zahl, Datum oder Beziehung mit dem passenden Inline-Zitat (z.B. [c003]). Bewahre bestehende [cNNN]-Zitate.
+- **Struktur**: Beginne mit "# {{pageTitle}}" gefolgt von einem Einleitungsabsatz. Gliedere längere Seiten mit ## Abschnitten (z.B. Hintergrund, Ursachen, Auswirkungen, Ausblick). Nutze Bullet-Listen für Aufzählungen von Fakten.
+- **Keine Halluzination**: Erfinde nichts, was nicht in den Quell-Chunks steht.
 
 <page_metadata>
   <slug>{{pageSlug}}</slug>
@@ -219,3 +228,73 @@ export const WIKI_INDEX_INTRO_UPDATE_PROMPT = `Du bist ein Wiki-Redakteur. Aktua
 </instructions>
 
 Gib NUR den aktualisierten Titel und Einleitungsabsatz aus.`;
+
+// ---------------------------------------------------------------------------
+// Chunk-Citation: Ordnet jedem Kandidaten die Quell-Chunks zu, die ihn
+// substanziell behandeln (erzeugt die [cNNN]-Zitatmarker + neue Slugs).
+// ---------------------------------------------------------------------------
+export const WIKI_CHUNK_CITATION_PROMPT = `Du bist ein präzises Zitationssystem. Scanne die folgenden Dokument-Chunks und entscheide für jeden Kandidaten unten, welche Chunks ihn SUBSTANZIELL behandeln.
+
+<candidate_slugs>
+{{candidateSlugs}}
+</candidate_slugs>
+
+<chunks>
+{{chunksXml}}
+</chunks>
+
+<instructions>
+**WICHTIG: Schreibe alle Namen und Details auf {{language}}.**
+
+### Hauptaufgabe
+Wähle für jeden Kandidaten-Slug oben die Chunk-IDs (aus dem <chunks>-Block), die diese Entität / dieses Konzept **substanziell behandeln**. "Substanziell" heißt: Der Chunk nennt mindestens einen konkreten Fakt, ein Attribut, einen Schritt, ein Datum, eine Zahl, eine Beziehung oder eine andere nützliche Information über den Kandidaten – keine beiläufige Erwähnung.
+
+- Zitiere nur Chunks, die im <chunks>-Block oben vorkommen.
+- Verwende das "id"-Attribut jedes <c>-Elements exakt (z.B. "c003").
+- Wenn ein Kandidat in KEINEM Chunk dieses Batches sinnvoll behandelt wird, lass ihn in der Ausgabe weg (keine leeren Arrays).
+- Ein Chunk KANN von mehreren Kandidaten zitiert werden.
+
+### Zweitaufgabe: neue Slugs
+Falls dieses Batch eine wichtige Entität / ein wichtiges Konzept enthüllt, die/das NICHT in <candidate_slugs> steht, füge sie/es unter "new_slugs" hinzu. Nur wirklich neue, substanziell behandelte Elemente. Jeder Eintrag braucht: "type" ("entity" oder "concept"), "name", "slug" (Format "entity/..." bzw. "concept/..."), "aliases", "description", "details", "source_chunks" (Liste der Chunk-IDs aus diesem Batch).
+
+### JSON-Formatierungsregeln
+- **KRITISCH**: Verwende KEINE literal line breaks in JSON-String-Werten. Verwende stattdessen \\n.
+- Gib NUR gültiges JSON aus, keine Vorrede.
+</instructions>
+
+Ausgabeformat:
+{
+  "citations": {
+    "entity/xxx": ["c001", "c003"],
+    "concept/yyy": ["c002"]
+  },
+  "new_slugs": []
+}
+
+Falls nichts zitierwürdig ist, gib zurück: {"citations": {}, "new_slugs": []}`;
+
+// ---------------------------------------------------------------------------
+// Granularitäts-Guidance – steuert, wie eifrig die Extraktion Kandidaten
+// befördert. Wird in {{granularityGuidance}} von WIKI_CANDIDATE_SLUG_PROMPT
+// eingesetzt (Quelle: wiki_config.extraction_granularity).
+// ---------------------------------------------------------------------------
+export const WIKI_GRANULARITY_FOCUSED = `### Extraktions-Umfang (Granularität: fokussiert)
+Extrahiere NUR die wichtigsten Entitäten und Konzepte – insgesamt **3-7 Einträge**. Nimm ausschließlich das auf, was zentral für das Dokument ist und mehrfach substanziell diskutiert wird. Lass Nebenfiguren, beiläufig erwähnte Namen und Randthemen weg. Im Zweifel WEGLASSEN.`;
+
+export const WIKI_GRANULARITY_STANDARD = `### Extraktions-Umfang (Granularität: standard)
+Extrahiere die bedeutsamen Entitäten und Konzepte – typischerweise **5-15 Einträge**, abhängig von der Dokumentlänge. Nimm auf, was substanziell diskutiert wird (mindestens zweimal erwähnt oder detailliert beschrieben). Lass triviale, nur einmal namentlich genannte Elemente weg.`;
+
+export const WIKI_GRANULARITY_EXHAUSTIVE = `### Extraktions-Umfang (Granularität: erschöpfend)
+Extrahiere JEDE benannte Entität und JEDES erkennbare Konzept (Glossar-Modus). Nimm auch einmalig erwähnte, aber klar identifizierbare Elemente auf. Lass nur reine Füllwörter und generische Begriffe ohne eigenständige Bedeutung weg.`;
+
+export function granularityGuidance(granularity?: string): string {
+  switch (granularity) {
+    case "focused":
+      return WIKI_GRANULARITY_FOCUSED;
+    case "exhaustive":
+      return WIKI_GRANULARITY_EXHAUSTIVE;
+    case "standard":
+    default:
+      return WIKI_GRANULARITY_STANDARD;
+  }
+}
