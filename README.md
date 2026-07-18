@@ -24,6 +24,7 @@ Stell Fragen via RAG-Chat **und** bekomme ein automatisch generiertes, verlinkte
 | **🕸️ Wiki-Graph**        | D3.js Force-Directed Graph der Verlinkungen          |
 | **🎥 YouTube-Import**    | Transkript → automatische Wiki-Seite                 |
 | **📥 WeKnora-Migration** | Dokumente, generierte Artikel & Embeddings 1:1 übernehmen |
+| **📱 Responsive**        | Handy-taugliche UI: Bottom-Nav, Master/Detail-Wiki, Chat-Verlauf als Drawer |
 | **🔐 Auth**              | JWT + bcrypt, Rollen: Admin / Editor / Viewer        |
 
 ---

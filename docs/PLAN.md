@@ -343,6 +343,7 @@ export const wikiPages = pgTable("wiki_pages", {
 - [x] Wiki-Auto-Generierung: LLM aus Chunks → Summary/Entity/Concept mit Crosslinks (`wiki-generate.ts`, Prompts in `wiki-prompts.ts`)
 - [x] JSONB-Felder `aliases`, `source_refs`, `page_metadata`, `chunk_refs` auf `wiki_pages`
 - [x] WeKnora-Migration (DB→DB): Dokumente, generierte Artikel, Embeddings 1:1 (`weknora-db-import.ts` + `embed-backfill.ts`)
+- [x] Responsive UI (Handy): Bottom-Nav, Wiki als Master/Detail, Chat-Verlauf als Drawer, scrollbare Tabs
 - [x] Docker Compose + Deploy-Script (Hetzner)
 
 ### 🔜 Offen / optional
