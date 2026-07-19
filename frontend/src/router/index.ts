@@ -54,7 +54,7 @@ const router = createRouter({
         {
           path: "graph",
           name: "WorkspaceGraph",
-          component: () => import("../views/wiki/WikiBrowser.vue"),
+          component: () => import("../views/wiki/GraphView.vue"),
         },
       ],
     },

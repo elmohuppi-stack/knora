@@ -8,6 +8,7 @@ import { documentRouter } from "./router/document.ts";
 import { searchRouter } from "./router/search.ts";
 import { chatRouter } from "./router/chat.ts";
 import { wikiRouter } from "./router/wiki.ts";
+import { topicRouter } from "./router/topic.ts";
 import { activityRouter } from "./router/activity.ts";
 
 const app = new Hono();
@@ -49,6 +50,9 @@ app.route("/api/v1/chat", chatRouter);
 
 // Wiki Routes
 app.route("/api/v1/wiki", wikiRouter);
+
+// Topic Routes (Themen pro Workspace, Ebene 1)
+app.route("/api/v1/topics", topicRouter);
 
 // Activity-Log Routes (für eingeloggte User, workspace-gefiltert)
 app.route("/api/v1/activity", activityRouter);

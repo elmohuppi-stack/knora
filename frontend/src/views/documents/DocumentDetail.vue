@@ -61,6 +61,19 @@
         </div>
       </div>
 
+      <!-- Themen (Ebene 1): Zuweisung/Korrektur -->
+      <div class="topic-assign" v-if="allTopics.length">
+        <strong>Themen:</strong>
+        <button
+          v-for="t in allTopics"
+          :key="t.id"
+          :class="['topic-chip', { active: docTopicIds.includes(t.id) }]"
+          @click="toggleDocTopic(t.id)"
+        >
+          {{ t.label }}
+        </button>
+      </div>
+
       <!-- Metadaten + Transkript -->
       <div class="meta-grid">
         <div class="meta-card">
@@ -156,10 +169,48 @@ const youtubeId = computed(() => {
 });
 
 const channelName = computed(() => {
+  // Bevorzugt das strukturierte Feld (Ebene 2), Fallback: aus content parsen.
+  if (doc.value?.channel) return doc.value.channel;
   const c = doc.value?.content || "";
   const match = c.match(/\*\*Kanal\*\*:\s*(.+)/);
   return match?.[1]?.trim() || "-";
 });
+
+// Themen (Ebene 1)
+const allTopics = ref<any[]>([]);
+const docTopicIds = ref<string[]>([]);
+async function loadTopics() {
+  try {
+    const r = await axios.get(`/api/v1/topics/${workspaceId}`);
+    allTopics.value = r.data.topics || [];
+  } catch {
+    /* ignore */
+  }
+}
+async function loadDocTopics() {
+  try {
+    const r = await axios.get(`/api/v1/documents/${documentId}/topics`);
+    docTopicIds.value = r.data.topic_ids || [];
+  } catch {
+    /* ignore */
+  }
+}
+async function toggleDocTopic(id: string) {
+  const i = docTopicIds.value.indexOf(id);
+  const next =
+    i >= 0
+      ? docTopicIds.value.filter((x) => x !== id)
+      : [...docTopicIds.value, id];
+  docTopicIds.value = next;
+  try {
+    await axios.patch(`/api/v1/documents/${documentId}/topics`, {
+      topic_ids: next,
+    });
+  } catch (e) {
+    // Bei Fehler neu laden (Zustand konsistent halten)
+    await loadDocTopics();
+  }
+}
 
 const fullDescription = computed(() => {
   const c = doc.value?.content || "";
@@ -177,7 +228,12 @@ onMounted(async () => {
     router.push("/login");
     return;
   }
-  await Promise.all([loadDoc(), loadWikiPages()]);
+  await Promise.all([
+    loadDoc(),
+    loadWikiPages(),
+    loadTopics(),
+    loadDocTopics(),
+  ]);
 });
 
 async function loadDoc() {
@@ -624,5 +680,36 @@ function formatDate(dateStr: string) {
     white-space: nowrap;
     flex-shrink: 0;
   }
+}
+
+/* Themen-Zuweisung (Ebene 1) */
+.topic-assign {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0 1.5rem 1rem;
+}
+.topic-assign > strong {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+.topic-assign .topic-chip {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.topic-assign .topic-chip:hover {
+  border-color: var(--color-primary);
+}
+.topic-assign .topic-chip.active {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
 }
 </style>

@@ -1,12 +1,26 @@
 import { db } from "../db/index.ts";
 import {
   wikiPages,
+  wikiPageRevisions,
   documents,
   chunks,
   workspaces,
   modelProviders,
+  documentTopics,
 } from "../db/schema.ts";
-import { eq, and, like, or, desc, sql, inArray } from "drizzle-orm";
+import {
+  eq,
+  and,
+  like,
+  or,
+  desc,
+  asc,
+  gte,
+  lte,
+  sql,
+  inArray,
+  getTableColumns,
+} from "drizzle-orm";
 import { splitIntoChunks, saveChunks } from "./document.ts";
 
 // --- Wiki-Chunk-Sync (für Chat-Suche) ---
@@ -72,12 +86,30 @@ export async function deleteWikiPageChunks(
 
 // --- CRUD ---
 
+export type WikiSort =
+  | "updated_desc"
+  | "updated_asc"
+  | "title_asc"
+  | "title_desc"
+  | "published_desc"
+  | "published_asc"
+  | "connections_desc";
+
 export async function listPages(
   workspaceId: string,
   options?: {
     page_type?: string;
     query?: string;
     source_document_id?: string;
+    // Herkunfts-Filter/Sortierung über das Quell-Dokument (Ebene 2).
+    // Betreffen nur Seiten mit source_document_id (v.a. Summaries).
+    channel?: string;
+    dateFrom?: Date;
+    dateTo?: Date;
+    topicIds?: string[];
+    // Ebene 3: nur Seiten, deren out_links diesen Slug enthalten (Backlink-Filter).
+    references?: string;
+    sort?: WikiSort;
     page?: number;
     page_size?: number;
   },
@@ -105,18 +137,72 @@ export async function listPages(
       eq(wikiPages.source_document_id, options.source_document_id),
     )!;
   }
+  if (options?.channel) {
+    conditions = and(conditions, eq(documents.channel, options.channel))!;
+  }
+  if (options?.dateFrom) {
+    conditions = and(conditions, gte(documents.created_at, options.dateFrom))!;
+  }
+  if (options?.dateTo) {
+    conditions = and(conditions, lte(documents.created_at, options.dateTo))!;
+  }
+  // Backlink-Filter (Ebene 3): Seiten, deren out_links den Slug enthalten.
+  if (options?.references) {
+    conditions = and(
+      conditions,
+      sql`${wikiPages.out_links} @> ${JSON.stringify([options.references])}::jsonb`,
+    )!;
+  }
+  // Themen-Filter (Ebene 1): Seiten, deren Quell-Dokument eines der Themen hat.
+  if (options?.topicIds && options.topicIds.length > 0) {
+    conditions = and(
+      conditions,
+      inArray(
+        wikiPages.source_document_id,
+        db
+          .select({ id: documentTopics.document_id })
+          .from(documentTopics)
+          .where(inArray(documentTopics.topic_id, options.topicIds)),
+      ),
+    )!;
+  }
 
+  const orderBy = (() => {
+    switch (options?.sort) {
+      case "updated_asc":
+        return asc(wikiPages.updated_at);
+      case "title_asc":
+        return asc(wikiPages.title);
+      case "title_desc":
+        return desc(wikiPages.title);
+      case "published_desc":
+        return sql`${documents.published_at} desc nulls last`;
+      case "published_asc":
+        return sql`${documents.published_at} asc nulls last`;
+      case "connections_desc":
+        // Vernetzung = Summe ein-/ausgehender Links.
+        return sql`(jsonb_array_length(${wikiPages.out_links}) + jsonb_array_length(${wikiPages.in_links})) desc`;
+      case "updated_desc":
+      default:
+        return desc(wikiPages.updated_at);
+    }
+  })();
+
+  // LEFT JOIN auf documents, damit Kanal/Datum/published-Sort funktionieren.
+  // getTableColumns hält die Rückgabe auf die flache wikiPages-Form.
   const rows = await db
-    .select()
+    .select(getTableColumns(wikiPages))
     .from(wikiPages)
+    .leftJoin(documents, eq(wikiPages.source_document_id, documents.id))
     .where(conditions)
-    .orderBy(desc(wikiPages.updated_at))
+    .orderBy(orderBy)
     .limit(pageSize)
     .offset((page - 1) * pageSize);
 
   const [countResult] = await db
     .select({ count: sql<number>`count(*)` })
     .from(wikiPages)
+    .leftJoin(documents, eq(wikiPages.source_document_id, documents.id))
     .where(conditions);
 
   return {
@@ -125,6 +211,111 @@ export async function listPages(
     page,
     page_size: pageSize,
   };
+}
+
+/** Meistverlinkte Konzepte (Ebene 3) – Einstiegspunkte für den Backlink-Filter. */
+export async function topConcepts(workspaceId: string, limit = 20) {
+  const rows = await db
+    .select({
+      id: wikiPages.id,
+      slug: wikiPages.slug,
+      title: wikiPages.title,
+      summary: wikiPages.summary,
+      page_type: wikiPages.page_type,
+      connections: sql<number>`jsonb_array_length(${wikiPages.in_links})`,
+    })
+    .from(wikiPages)
+    .where(
+      and(
+        eq(wikiPages.workspace_id, workspaceId),
+        eq(wikiPages.page_type, "concept"),
+      ),
+    )
+    .orderBy(desc(sql`jsonb_array_length(${wikiPages.in_links})`))
+    .limit(limit);
+  return rows.map((r) => ({ ...r, connections: Number(r.connections || 0) }));
+}
+
+/**
+ * Graph-Daten (Graph-Tab). „Erst fokussieren, dann zeichnen": ohne Fokus werden
+ * nur die meistverlinkten Konzepte als Einstiegs-Wolke geliefert; mit Fokus der
+ * 1-Hop-Subgraph (Fokus + direkte Nachbarn) inkl. Kanten – klein & lesbar statt
+ * 2600er-Hairball.
+ */
+export async function getGraph(
+  workspaceId: string,
+  opts: { focus?: string; types?: string[]; limit?: number },
+) {
+  const limit = opts.limit || 150;
+  const toNode = (p: any) => ({
+    slug: p.slug,
+    title: p.title,
+    type: p.page_type,
+    summary: (p.summary || "").slice(0, 200),
+    connections:
+      ((p.out_links as string[]) || []).length +
+      ((p.in_links as string[]) || []).length,
+  });
+
+  // Ohne Fokus: Einstiegs-Wolke aus Top-Konzepten (keine Kanten).
+  if (!opts.focus) {
+    const concepts = await topConcepts(workspaceId, Math.min(limit, 40));
+    return {
+      focus: null,
+      nodes: concepts
+        .filter((c) => c.connections > 0)
+        .map((c) => ({
+          slug: c.slug,
+          title: c.title,
+          type: c.page_type,
+          summary: (c.summary || "").slice(0, 200),
+          connections: c.connections,
+        })),
+      edges: [] as { source: string; target: string }[],
+    };
+  }
+
+  const focus = await getPage(workspaceId, opts.focus);
+  if (!focus) return { focus: opts.focus, nodes: [], edges: [] };
+
+  // 1-Hop-Nachbarn = ein-/ausgehende Links.
+  const neighborSlugs = Array.from(
+    new Set([
+      ...((focus.out_links as string[]) || []),
+      ...((focus.in_links as string[]) || []),
+    ]),
+  ).slice(0, limit);
+
+  const allSlugs = Array.from(new Set([focus.slug, ...neighborSlugs]));
+  let rows =
+    allSlugs.length > 0
+      ? await db
+          .select()
+          .from(wikiPages)
+          .where(
+            and(
+              eq(wikiPages.workspace_id, workspaceId),
+              inArray(wikiPages.slug, allSlugs),
+            ),
+          )
+      : [];
+
+  // Optionaler Typ-Filter (Fokus bleibt immer enthalten).
+  if (opts.types && opts.types.length > 0) {
+    rows = rows.filter(
+      (r) => r.slug === focus.slug || opts.types!.includes(r.page_type),
+    );
+  }
+
+  const slugSet = new Set(rows.map((r) => r.slug));
+  const edges: { source: string; target: string }[] = [];
+  for (const r of rows) {
+    for (const tgt of (r.out_links as string[]) || []) {
+      if (slugSet.has(tgt)) edges.push({ source: r.slug, target: tgt });
+    }
+  }
+
+  return { focus: focus.slug, nodes: rows.map(toNode), edges };
 }
 
 export async function getPage(workspaceId: string, slug: string) {
@@ -192,7 +383,31 @@ export async function updatePage(
     status?: string;
     out_links?: string[];
   },
+  // Ebene 4: manual=true → Nutzer-Edit (Snapshot + Lock setzen). Ohne opts =
+  // Auto-Update aus der Ingestion-Pipeline.
+  opts?: { manual?: boolean; editedBy?: number },
 ) {
+  const existing = await getPage(workspaceId, slug);
+  if (!existing) return null;
+
+  // Lock: Auto-Updates (Pipeline) überschreiben keine manuell editierten Seiten.
+  if (!opts?.manual && (existing as any).manually_edited) {
+    return existing;
+  }
+
+  // Versionshistorie: vor manueller Content-Änderung die alte Fassung sichern.
+  if (opts?.manual && data.content !== undefined) {
+    await db.insert(wikiPageRevisions).values({
+      page_id: existing.id,
+      workspace_id: workspaceId,
+      version: existing.version,
+      title: existing.title,
+      summary: existing.summary,
+      content: existing.content,
+      edited_by: opts.editedBy ?? null,
+    });
+  }
+
   const updateData: Record<string, any> = { updated_at: new Date() };
   if (data.title !== undefined) updateData.title = data.title;
   if (data.content !== undefined) updateData.content = data.content;
@@ -201,6 +416,10 @@ export async function updatePage(
   if (data.status !== undefined) updateData.status = data.status;
   if (data.out_links !== undefined) updateData.out_links = data.out_links;
   if (data.content !== undefined) updateData.version = sql`version + 1`;
+  if (opts?.manual) {
+    updateData.manually_edited = true;
+    if (opts.editedBy) updateData.updated_by = opts.editedBy;
+  }
 
   const [page] = await db
     .update(wikiPages)
@@ -216,6 +435,40 @@ export async function updatePage(
   }
 
   return page || null;
+}
+
+// Ebene 4: Versionshistorie ----
+
+export async function listRevisions(workspaceId: string, slug: string) {
+  const page = await getPage(workspaceId, slug);
+  if (!page) return [];
+  return await db
+    .select()
+    .from(wikiPageRevisions)
+    .where(eq(wikiPageRevisions.page_id, page.id))
+    .orderBy(desc(wikiPageRevisions.created_at));
+}
+
+/** Stellt eine frühere Fassung wieder her (die aktuelle wird zuvor als Revision gesichert). */
+export async function restoreRevision(
+  workspaceId: string,
+  slug: string,
+  revisionId: number,
+  editedBy?: number,
+) {
+  const [rev] = await db
+    .select()
+    .from(wikiPageRevisions)
+    .where(eq(wikiPageRevisions.id, revisionId))
+    .limit(1);
+  if (!rev) return null;
+  // updatePage(manual) sichert die aktuelle Fassung und setzt die alte ein.
+  return await updatePage(
+    workspaceId,
+    slug,
+    { title: rev.title, summary: rev.summary, content: rev.content },
+    { manual: true, editedBy },
+  );
 }
 
 export async function deletePage(workspaceId: string, slug: string) {
@@ -241,6 +494,13 @@ export async function deletePage(workspaceId: string, slug: string) {
         sql`${slug} = ANY(in_links)`,
       ),
     );
+
+  // Revisionen entfernen (FK ohne Cascade), sonst Constraint-Fehler beim Löschen.
+  if (page?.id) {
+    await db
+      .delete(wikiPageRevisions)
+      .where(eq(wikiPageRevisions.page_id, page.id));
+  }
 
   await db
     .delete(wikiPages)
@@ -271,13 +531,14 @@ export async function resolveLinks(
   }
 
   // Nur existierende Slugs als out_links speichern
+  if (slugs.length === 0) return { out_links: [], content };
   const existing = await db
     .select({ slug: wikiPages.slug })
     .from(wikiPages)
     .where(
       and(
         eq(wikiPages.workspace_id, workspaceId),
-        sql`${wikiPages.slug} = ANY(${slugs}::text[])`,
+        inArray(wikiPages.slug, slugs),
       ),
     );
 

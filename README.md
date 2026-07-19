@@ -21,9 +21,12 @@ Stell Fragen via RAG-Chat **und** bekomme ein automatisch generiertes, verlinkte
 | **📖 Wiki-Generierung**  | LLM erstellt Summary-/Entity-/Concept-Seiten – **kapitelweise über das ganze Dokument** (nicht nur den Anfang) |
 | **🎚️ Wiki-Tiefe**        | Pro Workspace steuerbar (`full`/`capped`/`summary`/`off`) – Kosten vs. Detailtiefe bei großen Dokumenten |
 | **🔗 Verlinktes Wiki**   | `[[Slug]]`-Links zwischen Wiki-Seiten                |
-| **✏️ TipTap-Editor**     | WYSIWYG-Editor mit `[[slug]]`-Autocompletion         |
-| **🕸️ Wiki-Graph**        | D3.js Force-Directed Graph der Verlinkungen          |
-| **🎥 YouTube-Import**    | Transkript → automatische Wiki-Seite                 |
+| **✏️ Artikel-Editor**    | Markdown-Editor mit Link-Toolbar, **Versionshistorie** & **Lock** (Auto-Generierung überschreibt Handedits nicht) |
+| **🎛️ Filter & Facetten** | Dokumente/Wiki nach Typ, Kanal, Datum, Volltext filtern & sortieren; adaptives Discovery-Layout (Karten-Grid) |
+| **🏷️ Themen pro Workspace** | Datenbasierte Themen-Vorschläge (LLM-Clustering der Konzepte), Auto-Klassifikation + manuelle Zuweisung, Themen-Filter |
+| **🔎 Backlink-Filter**   | Concept/Entity → alle referenzierenden Artikel; „Top-Konzepte"-Facette |
+| **🕸️ Wiki-Graph**        | D3-Force-Graph: Fokus-Subgraph (statt Hairball), Klick auf Knoten → Seiten-Panel mit Artikel |
+| **🎥 YouTube-Import**    | Transkript → automatische Wiki-Seite; Kanal/Datum/Dauer/Tags als Metadaten |
 | **📥 WeKnora-Migration** | Dokumente, generierte Artikel & Embeddings 1:1 übernehmen |
 | **📱 Responsive**        | Handy-taugliche UI: Bottom-Nav, Master/Detail-Wiki, Chat-Verlauf als Drawer |
 | **🔐 Auth**              | JWT + bcrypt, Rollen: Admin / Editor / Viewer        |
@@ -42,8 +45,8 @@ Stell Fragen via RAG-Chat **und** bekomme ein automatisch generiertes, verlinkte
 | **ORM**          | [Drizzle](https://orm.drizzle.team)                                                         |
 | **Datenbank**    | [PostgreSQL](https://www.postgresql.org) + [pgvector](https://github.com/pgvector/pgvector) |
 | **LLM**          | [Vercel AI SDK](https://sdk.vercel.ai/docs) (SSE-Streaming)                                 |
-| **Wiki-Editor**  | [TipTap](https://tiptap.dev) (ProseMirror)                                                  |
-| **Wiki-Graph**   | [D3.js](https://d3js.org)                                                                   |
+| **Wiki-Editor**  | Markdown-Editor mit Link-Toolbar ([TipTap](https://tiptap.dev) installiert für späteres WYSIWYG) |
+| **Wiki-Graph**   | [D3.js](https://d3js.org) (d3-force)                                                        |
 | **Shared Types** | `packages/shared/` (TypeScript End-to-End)                                                  |
 
 ---

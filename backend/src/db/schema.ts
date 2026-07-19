@@ -8,6 +8,7 @@ import {
   timestamp,
   jsonb,
   uniqueIndex,
+  index,
   vector,
 } from "drizzle-orm/pg-core";
 
@@ -100,31 +101,90 @@ export const workspaceMembers = pgTable(
   }),
 );
 
-export const documents = pgTable("documents", {
-  id: varchar("id", { length: 36 }).primaryKey(),
-  workspace_id: varchar("workspace_id", { length: 36 })
-    .notNull()
-    .references(() => workspaces.id),
-  title: varchar("title", { length: 512 }).notNull(),
-  type: varchar("type", { length: 50 }).notNull(),
-  source: text("source").notNull(),
-  source_url: text("source_url"),
-  content: text("content"),
-  file_path: text("file_path"),
-  file_size: integer("file_size"),
-  file_hash: varchar("file_hash", { length: 64 }),
-  parse_status: varchar("parse_status", { length: 20 })
-    .default("pending")
-    .notNull(),
-  parse_error: text("parse_error"),
-  chunk_count: integer("chunk_count").default(0).notNull(),
-  created_by: integer("created_by")
-    .notNull()
-    .references(() => users.id),
-  created_at: timestamp("created_at").defaultNow().notNull(),
-  updated_at: timestamp("updated_at").defaultNow().notNull(),
-  processed_at: timestamp("processed_at"),
-});
+export const documents = pgTable(
+  "documents",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    workspace_id: varchar("workspace_id", { length: 36 })
+      .notNull()
+      .references(() => workspaces.id),
+    title: varchar("title", { length: 512 }).notNull(),
+    type: varchar("type", { length: 50 }).notNull(),
+    source: text("source").notNull(),
+    source_url: text("source_url"),
+    content: text("content"),
+    file_path: text("file_path"),
+    file_size: integer("file_size"),
+    file_hash: varchar("file_hash", { length: 64 }),
+    parse_status: varchar("parse_status", { length: 20 })
+      .default("pending")
+      .notNull(),
+    parse_error: text("parse_error"),
+    chunk_count: integer("chunk_count").default(0).notNull(),
+    // Herkunfts-Metadaten (v.a. YouTube). Beim Import befüllt, sonst null.
+    // channel/published_at/duration sind eigene Spalten für Filter/Sortierung;
+    // source_metadata (jsonb) hält den Rest (channelUrl, thumbnailUrl, youtube_tags).
+    channel: varchar("channel", { length: 255 }),
+    published_at: timestamp("published_at"),
+    duration: integer("duration"),
+    source_metadata: jsonb("source_metadata").default({}).notNull(),
+    created_by: integer("created_by")
+      .notNull()
+      .references(() => users.id),
+    created_at: timestamp("created_at").defaultNow().notNull(),
+    updated_at: timestamp("updated_at").defaultNow().notNull(),
+    processed_at: timestamp("processed_at"),
+  },
+  (table) => ({
+    channelIdx: index("documents_channel_idx").on(table.channel),
+  }),
+);
+
+// Themen pro Workspace (Ebene 1). First-Class-Objekte, editierbar; Zuordnung
+// zu Dokumenten über die Junction document_topics (auto per LLM / manuell).
+export const topics = pgTable(
+  "topics",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    workspace_id: varchar("workspace_id", { length: 36 })
+      .notNull()
+      .references(() => workspaces.id),
+    slug: varchar("slug", { length: 255 }).notNull(),
+    label: varchar("label", { length: 255 }).notNull(),
+    description: text("description"),
+    color: varchar("color", { length: 20 }),
+    sort_order: integer("sort_order").default(0).notNull(),
+    created_at: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    uniqueTopicSlug: uniqueIndex("unique_workspace_topic_slug").on(
+      table.workspace_id,
+      table.slug,
+    ),
+  }),
+);
+
+export const documentTopics = pgTable(
+  "document_topics",
+  {
+    id: serial("id").primaryKey(),
+    document_id: varchar("document_id", { length: 36 })
+      .notNull()
+      .references(() => documents.id),
+    topic_id: varchar("topic_id", { length: 36 })
+      .notNull()
+      .references(() => topics.id),
+    // "auto" = LLM-klassifiziert, "manual" = händisch gesetzt/korrigiert.
+    source: varchar("source", { length: 20 }).default("auto").notNull(),
+    created_at: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    uniqueDocTopic: uniqueIndex("unique_document_topic").on(
+      table.document_id,
+      table.topic_id,
+    ),
+  }),
+);
 
 export const chunks = pgTable("chunks", {
   id: varchar("id", { length: 36 }).primaryKey(),
@@ -167,6 +227,10 @@ export const wikiPages = pgTable(
     page_metadata: jsonb("page_metadata").default({}).notNull(),
     version: integer("version").default(1).notNull(),
     created_by: integer("created_by").references(() => users.id),
+    // Ebene 4: wer zuletzt manuell editiert hat + Schutz-Flag gegen Überschreiben
+    // durch die Ingestion-Pipeline (Lock).
+    updated_by: integer("updated_by").references(() => users.id),
+    manually_edited: boolean("manually_edited").default(false).notNull(),
     created_at: timestamp("created_at").defaultNow().notNull(),
     updated_at: timestamp("updated_at").defaultNow().notNull(),
   },
@@ -177,6 +241,23 @@ export const wikiPages = pgTable(
     ),
   }),
 );
+
+// Ebene 4: Versionshistorie – Snapshot der Seite VOR jeder manuellen Änderung.
+export const wikiPageRevisions = pgTable("wiki_page_revisions", {
+  id: serial("id").primaryKey(),
+  page_id: varchar("page_id", { length: 36 })
+    .notNull()
+    .references(() => wikiPages.id),
+  workspace_id: varchar("workspace_id", { length: 36 })
+    .notNull()
+    .references(() => workspaces.id),
+  version: integer("version").notNull(),
+  title: varchar("title", { length: 512 }).notNull(),
+  summary: text("summary").notNull().default(""),
+  content: text("content").notNull().default(""),
+  edited_by: integer("edited_by").references(() => users.id),
+  created_at: timestamp("created_at").defaultNow().notNull(),
+});
 
 export const chatSessions = pgTable("chat_sessions", {
   id: varchar("id", { length: 36 }).primaryKey(),

@@ -146,6 +146,8 @@ h1 {
   border-radius: 8px;
   font-size: 0.95rem;
   font-family: inherit;
+  /* Karte ist immer hell → Text explizit dunkel, unabhängig von App-/PrimeVue-Theme */
+  color: #1a1a2e;
   transition:
     border-color 0.2s,
     box-shadow 0.2s;

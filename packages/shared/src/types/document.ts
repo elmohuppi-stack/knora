@@ -24,6 +24,18 @@ export const DocumentSchema = z.object({
   parse_status: z.enum(["pending", "processing", "completed", "failed"]),
   parse_error: z.string().nullable(),
   chunk_count: z.number().default(0),
+  // Herkunfts-Metadaten (v.a. YouTube), beim Import befüllt, sonst null.
+  channel: z.string().nullable().optional(),
+  published_at: z.string().datetime().nullable().optional(),
+  duration: z.number().nullable().optional(),
+  source_metadata: z
+    .object({
+      channelUrl: z.string().optional(),
+      thumbnailUrl: z.string().optional(),
+      youtube_tags: z.array(z.string()).optional(),
+    })
+    .passthrough()
+    .optional(),
   created_by: z.number(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),

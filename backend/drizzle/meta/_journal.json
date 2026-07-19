@@ -15,6 +15,27 @@
       "when": 1784355204057,
       "tag": "0001_organic_shriek",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784446460229,
+      "tag": "0002_naive_ultimo",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784450080918,
+      "tag": "0003_careless_ghost_rider",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784454779412,
+      "tag": "0004_polite_mongoose",
+      "breakpoints": true
     }
   ]
 }

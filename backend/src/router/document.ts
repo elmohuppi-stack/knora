@@ -7,8 +7,11 @@ import {
   extractVideoId,
   fetchYouTubeInfo,
   buildDocumentContent,
+  buildDocumentMetadata,
 } from "../service/youtube.ts";
+import type { DocumentSort } from "../service/document.ts";
 import { logActivity, updateLog } from "../service/activity-log.ts";
+import * as topicService from "../service/topic.ts";
 
 const documentRouter = new Hono();
 documentRouter.use("*", authMiddleware);
@@ -19,12 +22,61 @@ const urlSchema = z.object({
   title: z.string().optional(),
 });
 
-// Dokumente eines Workspace auflisten
+// Distinct-Kanäle eines Workspace (für das Kanal-Filter-Dropdown)
+documentRouter.get("/:workspaceId/channels", async (c) => {
+  const workspaceId = c.req.param("workspaceId");
+  const channels = await documentService.listChannels(workspaceId);
+  return c.json({ channels });
+});
+
+// Dokumente eines Workspace auflisten (mit Filter/Sortierung, Ebene 2)
 documentRouter.get("/:workspaceId", async (c) => {
   const workspaceId = c.req.param("workspaceId");
-  const list = await documentService.listDocuments(workspaceId);
+  const q = c.req.query();
+  const parseDate = (v?: string) => {
+    if (!v) return undefined;
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? undefined : d;
+  };
+  const allowedSorts: DocumentSort[] = [
+    "created_desc",
+    "created_asc",
+    "published_desc",
+    "published_asc",
+    "title_asc",
+    "title_desc",
+  ];
+  const list = await documentService.listDocuments(workspaceId, {
+    type: q.type || undefined,
+    channel: q.channel || undefined,
+    query: q.q || undefined,
+    dateFrom: parseDate(q.from),
+    dateTo: parseDate(q.to),
+    topicIds: q.topics ? q.topics.split(",").filter(Boolean) : undefined,
+    sort: allowedSorts.includes(q.sort as DocumentSort)
+      ? (q.sort as DocumentSort)
+      : undefined,
+  });
   return c.json({ documents: list });
 });
+
+// Themen eines Dokuments abrufen (topic_ids)
+documentRouter.get("/:id/topics", async (c) => {
+  const ids = await topicService.getDocumentTopicIds(c.req.param("id"));
+  return c.json({ topic_ids: ids });
+});
+
+// Themen eines Dokuments setzen (manuelle Korrektur, ersetzt alle Zuordnungen)
+const docTopicsSchema = z.object({ topic_ids: z.array(z.string()) });
+documentRouter.patch(
+  "/:id/topics",
+  zValidator("json", docTopicsSchema),
+  async (c) => {
+    const { topic_ids } = c.req.valid("json");
+    await topicService.setDocumentTopics(c.req.param("id"), topic_ids);
+    return c.json({ topic_ids });
+  },
+);
 
 // Einzelnes Dokument abrufen
 documentRouter.get("/detail/:id", async (c) => {
@@ -267,6 +319,7 @@ documentRouter.post(
     const content = buildDocumentContent(info);
     console.log(`[doc] Dokument-Content: ${content.length} Zeichen`);
 
+    const meta = buildDocumentMetadata(info);
     const doc = await documentService.createDocument({
       id: crypto.randomUUID(),
       workspace_id,
@@ -275,6 +328,10 @@ documentRouter.post(
       source: url,
       source_url: `https://www.youtube.com/watch?v=${videoId}`,
       content,
+      channel: meta.channel,
+      published_at: meta.published_at,
+      duration: meta.duration,
+      source_metadata: meta.source_metadata,
       created_by: user.id,
     });
     console.log(`[doc] ✅ Dokument erstellt: ${doc.id}`);
@@ -311,6 +368,40 @@ documentRouter.post(
     return c.json({ document: doc }, 201);
   },
 );
+
+// YouTube-Metadaten eines einzelnen Dokuments neu abrufen (Ebene 2).
+// Für Altbestand, bei dem published_at/duration/tags nie gespeichert wurden,
+// oder um veraltete Metadaten zu aktualisieren. Content/Transkript bleibt.
+documentRouter.post("/:id/refresh-metadata", async (c) => {
+  const id = c.req.param("id");
+  const doc = await documentService.getDocument(id);
+  if (!doc) return c.json({ error: "Document not found" }, 404);
+  if (doc.type !== "youtube") {
+    return c.json(
+      { error: "Metadata refresh is only supported for YouTube documents" },
+      400,
+    );
+  }
+
+  const videoId = extractVideoId(doc.source_url || doc.source);
+  if (!videoId) {
+    return c.json({ error: "Could not extract video ID from document" }, 400);
+  }
+
+  const info = await fetchYouTubeInfo(videoId);
+  if (!info) {
+    return c.json({ error: "Could not fetch video information" }, 502);
+  }
+
+  const meta = buildDocumentMetadata(info);
+  const updated = await documentService.updateDocumentMetadata(id, {
+    channel: meta.channel,
+    published_at: meta.published_at,
+    duration: meta.duration,
+    source_metadata: meta.source_metadata,
+  });
+  return c.json({ document: updated });
+});
 
 // Dokument löschen
 documentRouter.delete("/:id", async (c) => {

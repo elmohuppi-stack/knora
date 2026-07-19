@@ -24,21 +24,63 @@ const updateSchema = z.object({
   status: z.enum(["published", "draft", "archived"]).optional(),
 });
 
-// Wiki-Seiten eines Workspace auflisten
+const WIKI_SORTS = [
+  "updated_desc",
+  "updated_asc",
+  "title_asc",
+  "title_desc",
+  "published_desc",
+  "published_asc",
+  "connections_desc",
+] as const;
+type WikiSortT = (typeof WIKI_SORTS)[number];
+
+// Wiki-Seiten eines Workspace auflisten (mit Filter/Sortierung, Ebene 2)
 wikiRouter.get("/:workspaceId/pages", async (c) => {
   const workspaceId = c.req.param("workspaceId");
-  const pageType = c.req.query("page_type");
-  const query = c.req.query("query");
-  const sourceDocId = c.req.query("source_document_id");
-  const page = parseInt(c.req.query("page") || "1");
+  const q = c.req.query();
+  const parseDate = (v?: string) => {
+    if (!v) return undefined;
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? undefined : d;
+  };
 
   const result = await wikiService.listPages(workspaceId, {
-    page_type: pageType,
-    query,
-    source_document_id: sourceDocId,
-    page,
+    page_type: q.page_type || undefined,
+    query: q.query || undefined,
+    source_document_id: q.source_document_id || undefined,
+    channel: q.channel || undefined,
+    dateFrom: parseDate(q.from),
+    dateTo: parseDate(q.to),
+    topicIds: q.topics ? q.topics.split(",").filter(Boolean) : undefined,
+    references: q.references || undefined,
+    sort: WIKI_SORTS.includes(q.sort as WikiSortT)
+      ? (q.sort as WikiSortT)
+      : undefined,
+    page: parseInt(q.page || "1"),
+    page_size: q.page_size ? parseInt(q.page_size) : undefined,
   });
   return c.json(result);
+});
+
+// Graph-Daten (Fokus-Subgraph oder Top-Konzepte-Wolke)
+wikiRouter.get("/:workspaceId/graph", async (c) => {
+  const workspaceId = c.req.param("workspaceId");
+  const q = c.req.query();
+  const graph = await wikiService.getGraph(workspaceId, {
+    focus: q.focus || undefined,
+    types: q.types ? q.types.split(",").filter(Boolean) : undefined,
+    limit: q.limit ? parseInt(q.limit) : undefined,
+  });
+  return c.json(graph);
+});
+
+// Ebene 3: meistverlinkte Konzepte (Backlink-Einstiegspunkte)
+wikiRouter.get("/:workspaceId/concepts/top", async (c) => {
+  const workspaceId = c.req.param("workspaceId");
+  const limit = parseInt(c.req.query("limit") || "20");
+  const concepts = await wikiService.topConcepts(workspaceId, limit);
+  return c.json({ concepts });
 });
 
 // Einzelne Wiki-Seite abrufen (per Slug)
@@ -99,22 +141,53 @@ wikiRouter.put(
     const workspaceId = c.req.param("workspaceId");
     const slug = decodeURIComponent(c.req.param("slug"));
     const data = c.req.valid("json");
+    const user = c.get("user");
+    // Manueller Edit (Ebene 4): Snapshot + Lock setzen.
+    const opts = { manual: true, editedBy: user?.id };
 
-    const page = await wikiService.updatePage(workspaceId, slug, data);
+    const page = await wikiService.updatePage(workspaceId, slug, data, opts);
     if (!page) return c.json({ error: "Page not found" }, 404);
 
-    // Bei Content-Änderung: Links neu auflösen
+    // Bei Content-Änderung: Links neu auflösen (ebenfalls als manual, sonst
+    // blockt der frisch gesetzte Lock das out_links-Update).
     if (data.content) {
       const { out_links } = await wikiService.resolveLinks(
         workspaceId,
         data.content,
       );
       if (out_links.length > 0) {
-        await wikiService.updatePage(workspaceId, slug, { out_links });
+        await wikiService.updatePage(workspaceId, slug, { out_links }, opts);
         await wikiService.updateIncomingLinks(workspaceId, slug, out_links);
       }
     }
 
+    return c.json({ page });
+  },
+);
+
+// Ebene 4: Versionshistorie einer Seite
+wikiRouter.get("/:workspaceId/pages/:slug/revisions", async (c) => {
+  const workspaceId = c.req.param("workspaceId");
+  const slug = decodeURIComponent(c.req.param("slug"));
+  const revisions = await wikiService.listRevisions(workspaceId, slug);
+  return c.json({ revisions });
+});
+
+// Ebene 4: frühere Fassung wiederherstellen
+wikiRouter.post(
+  "/:workspaceId/pages/:slug/revisions/:revId/restore",
+  async (c) => {
+    const workspaceId = c.req.param("workspaceId");
+    const slug = decodeURIComponent(c.req.param("slug"));
+    const revId = parseInt(c.req.param("revId"));
+    const user = c.get("user");
+    const page = await wikiService.restoreRevision(
+      workspaceId,
+      slug,
+      revId,
+      user?.id,
+    );
+    if (!page) return c.json({ error: "Revision not found" }, 404);
     return c.json({ page });
   },
 );

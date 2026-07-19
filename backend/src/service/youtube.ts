@@ -19,6 +19,8 @@ export interface YouTubeInfo {
   duration: number;
   thumbnailUrl: string;
   description: string;
+  publishedAt: string;
+  tags: string[];
   transcript: string;
   transcriptLanguage: string;
   transcriptSource: string;
@@ -119,6 +121,10 @@ export async function fetchYouTubeInfo(
     description:
       metadata?.description ||
       `YouTube-Video von ${metadata?.channelName || "unbekannt"}`,
+    // publishedAt + tags werden bisher hier verworfen – jetzt strukturiert
+    // durchgereicht (Ebene 2: Filter/Sortierung).
+    publishedAt: metadata?.publishedAt || "",
+    tags: metadata?.tags || [],
     transcript: transcript?.content || "",
     transcriptLanguage: transcript?.language || "unknown",
     transcriptSource: transcript?.source || "unknown",
@@ -162,4 +168,48 @@ export function buildDocumentContent(info: YouTubeInfo): string {
   const result = parts.join("\n");
   console.log(`[youtube] buildDocumentContent: ${result.length} Zeichen`);
   return result;
+}
+
+/**
+ * Parst das YouTube-Upload-Datum in ein Date.
+ * Apify liefert "YYYYMMDD", Supadata ein ISO-Datum. Null bei ungültig/leer.
+ */
+export function parsePublishedAt(raw: string): Date | null {
+  if (!raw) return null;
+  const compact = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) {
+    const d = new Date(`${compact[1]}-${compact[2]}-${compact[3]}T00:00:00Z`);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(raw);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+export interface YouTubeDocumentMetadata {
+  channel: string | null;
+  published_at: Date | null;
+  duration: number | null;
+  source_metadata: {
+    channelUrl?: string;
+    thumbnailUrl?: string;
+    youtube_tags?: string[];
+  };
+}
+
+/**
+ * Baut die strukturierten Dokument-Metadaten (Ebene 2) aus YouTubeInfo.
+ * channel/published_at/duration sind eigene DB-Spalten (Filter/Sortierung),
+ * der Rest landet in source_metadata (jsonb).
+ */
+export function buildDocumentMetadata(info: YouTubeInfo): YouTubeDocumentMetadata {
+  return {
+    channel: info.channelName || null,
+    published_at: parsePublishedAt(info.publishedAt),
+    duration: info.duration || null,
+    source_metadata: {
+      ...(info.channelUrl ? { channelUrl: info.channelUrl } : {}),
+      ...(info.thumbnailUrl ? { thumbnailUrl: info.thumbnailUrl } : {}),
+      ...(info.tags && info.tags.length ? { youtube_tags: info.tags } : {}),
+    },
+  };
 }

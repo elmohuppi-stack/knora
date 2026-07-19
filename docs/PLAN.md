@@ -348,14 +348,22 @@ export const wikiPages = pgTable("wiki_pages", {
 - [x] Hybrid Search (pgvector + tsvector)
 - [x] RAG-Chat mit Quellenangaben, SSE-Streaming (Vercel AI SDK) und Historie-Sidebar
 - [x] UI-Library PrimeVue 4 + Navigations-Grundgerüst
-- [x] Wiki-Browser (Tabs Summary/Entity/Concept, Suche, Filter)
-- [x] TipTap-Editor mit `[[slug]]`-Autocompletion, klickbare `[[Links]]`
-- [x] Wiki-Graph (D3.js Force-Directed)
 - [x] Wiki-Auto-Generierung: LLM aus Chunks → Summary/Entity/Concept mit Crosslinks (`wiki-generate.ts`, Prompts in `wiki-prompts.ts`)
 - [x] JSONB-Felder `aliases`, `source_refs`, `page_metadata`, `chunk_refs` auf `wiki_pages`
 - [x] WeKnora-Migration (DB→DB): Dokumente, generierte Artikel, Embeddings 1:1 (`weknora-db-import.ts` + `embed-backfill.ts`)
 - [x] Responsive UI (Handy): Bottom-Nav, Wiki als Master/Detail, Chat-Verlauf als Drawer, scrollbare Tabs
 - [x] Docker Compose + Deploy-Script (Hetzner)
+
+#### Filter, Themen, Bearbeitung & Graph (2026-07)
+
+- [x] **Herkunfts-Metadaten** (`documents.channel`/`published_at`/`duration`/`source_metadata`): YouTube-Kanal/Datum/Dauer/Tags beim Import erfasst (vorher verworfen); Kanal-Backfill-Skript (`backfill-channel.ts`) + „Metadaten aktualisieren"-Button pro Video
+- [x] **Filter & Facetten**: Dokumente- und Wiki-Liste nach Typ, Kanal, Datumsbereich, Volltext filter-/sortierbar (Datepicker); Filter-State in der URL
+- [x] **Adaptives Wiki-Layout**: Discovery (Facetten-Rail + Karten-Grid) ↔ Reader; Desktop-Verallgemeinerung des Mobile-Master/Detail
+- [x] **Themen pro Workspace** (`topics` + `document_topics`): datenbasierte Vorschläge aus Concepts (LLM-Clustering), Auto-Klassifikation beim Ingest + Backfill (`backfill-topics.ts`), manuelle Zuweisung/Korrektur, Filter-Chips
+- [x] **Artikel-Bearbeitung** (Ebene 4): Markdown-Editor mit Link-Toolbar (`[[intern]]` + `[extern](https://)`), **Versionshistorie** (`wiki_page_revisions`, Snapshot + Wiederherstellen) und **Lock** (`manually_edited` – Auto-Generierung überschreibt Handedits nicht). *TipTap ist installiert für ein späteres WYSIWYG-Upgrade, v1 nutzt Markdown.*
+- [x] **Backlink-Filter** (Ebene 3): Concept/Entity → alle referenzierenden Artikel; „Top-Konzepte"-Facette; Sortierung „Meiste Verknüpfungen"
+- [x] **Wiki-Graph** (D3-Force, neu gebaut): Fokus-Subgraph statt Hairball (ohne Fokus Top-Konzepte-Wolke, Klick → 1-Hop-Subgraph), Zoom/Pan, Typ-Filter, Such-Fokus; **Klick auf Knoten → Seiten-Drawer mit vollem Artikel** + „Nachbarn zeigen"/„Im Wiki öffnen"
+- [x] **Wiki-Tiefe-Selektor** in den Workspace-Einstellungen (statt funktionsloser Indexing-Checkboxen)
 
 ### 🔜 Offen / optional
 

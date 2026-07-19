@@ -103,27 +103,44 @@ echo 'DEPLOY_HOST=elmarhepp' >> .env
 
 ---
 
-## 🗄️ 3. Datenbank-Migration & Seed (einmalig)
+## 🗄️ 3. Datenbank-Migrationen anwenden
 
-Nach dem ersten Deployment die Datenbank migrieren und seeden:
+> **Wichtig:** Der `app`-Container enthält nur das gebündelte `dist/` – **kein**
+> `drizzle-kit`, keine `db:migrate`/`db:seed`-Scripts, keinen `drizzle/`-Ordner.
+> `docker compose exec app bun run db:migrate` funktioniert daher **nicht**.
+> Migrationen werden stattdessen als **rohes SQL direkt in den DB-Container**
+> gespielt – die `.sql`-Dateien liegen nach `git pull` im Checkout unter
+> `backend/drizzle/`.
 
 ```bash
 ssh elmarhepp
 cd /var/www/knora
+# DB-User aus der .env
+source .env
 
-# Migration ausführen
-docker compose exec app bun run db:migrate
-
-# Admin-User seeden
-docker compose exec app bun run db:seed
+# NUR die noch nicht angewandten Migrationen einspielen (additive DDL).
+# Reihenfolge einhalten. Bereits angewandte NICHT erneut ausführen
+# (raw SQL ist nicht idempotent → "column already exists").
+docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0002_naive_ultimo.sql
+docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0003_careless_ghost_rider.sql
+docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0004_polite_mongoose.sql
 ```
 
-> **Tipp:** Nach `ssh elmarhepp` und `cd /var/www/knora` kannst du auch:
->
-> ```bash
-> docker compose exec app bun run db:migrate
-> docker compose exec app bun run db:seed
-> ```
+**Welche Migrationen fehlen?** Vorhandene Spalten/Tabellen prüfen, z. B.:
+
+```bash
+# Hat die documents-Tabelle schon die channel-Spalte (Migration 0002)?
+docker compose exec -T db psql -U "$DB_USER" -d knora -c "\d documents" | grep channel
+# Gibt es die topics-Tabelle (0003) / wiki_page_revisions (0004)?
+docker compose exec -T db psql -U "$DB_USER" -d knora -c "\dt" | grep -E "topics|wiki_page_revisions"
+```
+
+Nur die Migrationen einspielen, deren Objekte noch fehlen.
+
+> **Seed (nur Erstinstallation):** Der Admin-User wird ebenfalls nicht im
+> Container geseedet. Bei einer frischen DB einmalig lokal gegen die Prod-DB
+> (`bun run db:seed`) oder den User direkt per SQL anlegen. Bei bestehender DB
+> mit Usern **nicht nötig**.
 
 ---
 
@@ -211,13 +228,9 @@ Einfach `deploy.sh` erneut ausführen – Git pullt die neuesten Changes, Docker
 ./deploy.sh feature-x  # feature-Branch
 ```
 
-Bei Datenbank-Änderungen zusätzlich migrieren:
-
-```bash
-ssh elmarhepp
-cd /var/www/knora
-docker compose exec app bun run db:migrate
-```
+Bei Datenbank-Änderungen zusätzlich die neuen Migrationen einspielen — siehe
+[Abschnitt 3](#-3-datenbank-migrationen-anwenden) (rohes SQL in den DB-Container,
+da der `app`-Container kein `drizzle-kit` enthält).
 
 ---
 
@@ -229,7 +242,7 @@ docker compose exec app bun run db:migrate
 | `knora-api.elmarhepp.de` antwortet nicht | Gleiche Prüfung + Health-Endpoint testen                                                |
 | YouTube-Import schlägt fehl              | Provider-Konfiguration prüfen (Apify/Supadata); auf Hetzner geht direktes YouTube nicht |
 | LLM-Antworten kommen nicht               | `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` in `.env` prüfen                                  |
-| Datenbank-Fehler                         | Migration fehlt? `docker compose exec app bun run db:migrate`                           |
+| Datenbank-Fehler / fehlende Spalte/Tabelle | Migration fehlt – neue `.sql` via `psql` in den DB-Container spielen (Abschnitt 3)     |
 | Container starten nicht                  | `docker compose logs app` für Details                                                   |
 | Port-Konflikt                            | Prüfen ob Ports 3000/3084 bereits belegt sind: `lsof -i :3000`                          |
 

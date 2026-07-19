@@ -27,6 +27,8 @@ import {
   granularityGuidance,
 } from "./wiki-prompts.ts";
 import * as wikiService from "./wiki.ts";
+import * as topicService from "./topic.ts";
+import { getActiveProvider, callLLM, callLLMJson } from "./llm.ts";
 
 // ---------------------------------------------------------------------------
 // Typen
@@ -507,6 +509,21 @@ export async function generateWikiArticles(
     )
     .catch((e) => console.warn(`[wiki-gen] Embedding-Trigger fehlgeschlagen:`, e));
 
+  // Auto-Themen-Klassifikation (Ebene 1): nur wenn der Workspace Themen hat und
+  // das Dokument noch keine zugeordneten (überschreibt keine Handedits). Robust –
+  // Fehler brechen die Wiki-Generierung nie ab.
+  try {
+    const classifyText =
+      summaryPage?.summary || summaryPage?.content || doc.title;
+    const topicIds = await topicService.classifyText(workspaceId, classifyText);
+    if (topicIds.length) {
+      await topicService.assignAutoTopics(docId, topicIds);
+      console.log(`[wiki-gen] 🏷️ ${topicIds.length} Themen zugeordnet`);
+    }
+  } catch (e: any) {
+    console.warn(`[wiki-gen] Themen-Klassifikation übersprungen: ${e.message}`);
+  }
+
   console.log(`[wiki-gen] ========== ENDE (${Date.now() - t0}ms) ==========`);
 
   return {
@@ -877,81 +894,5 @@ function slugify(text: string): string {
     .slice(0, 200);
 }
 
-async function getActiveProvider() {
-  let providers = await db
-    .select()
-    .from(modelProviders)
-    .where(
-      and(
-        eq(modelProviders.is_active, true),
-        eq(modelProviders.provider_type, "chat"),
-      ),
-    )
-    .limit(1);
-
-  if (!providers[0]) {
-    providers = await db
-      .select()
-      .from(modelProviders)
-      .where(
-        and(
-          eq(modelProviders.is_active, true),
-          eq(modelProviders.provider_type, "both"),
-        ),
-      )
-      .limit(1);
-  }
-  return providers[0] || null;
-}
-
-async function callLLM(provider: any, prompt: string): Promise<string | null> {
-  try {
-    const response = await fetch(`${provider.api_base_url}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${provider.api_key_encrypted}`,
-      },
-      body: JSON.stringify({
-        model: provider.default_model,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 8192,
-      }),
-      signal: AbortSignal.timeout(120000),
-    });
-
-    if (!response.ok) {
-      const err = await response.text().catch(() => "");
-      console.warn(
-        `[wiki-gen] LLM error ${response.status}: ${err.slice(0, 200)}`,
-      );
-      return null;
-    }
-
-    const data = await response.json();
-    return data?.choices?.[0]?.message?.content || null;
-  } catch (e: any) {
-    console.warn(`[wiki-gen] LLM call failed: ${e.message}`);
-    return null;
-  }
-}
-
-async function callLLMJson<T>(
-  provider: any,
-  prompt: string,
-): Promise<T | null> {
-  const raw = await callLLM(provider, prompt);
-  if (!raw) return null;
-
-  // JSON aus der Antwort extrahieren (zwischen { und })
-  try {
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]) as T;
-    }
-    return JSON.parse(raw) as T;
-  } catch (e: any) {
-    console.warn(`[wiki-gen] JSON parse failed: ${e.message}`);
-    return null;
-  }
-}
+// getActiveProvider / callLLM / callLLMJson sind nach service/llm.ts extrahiert
+// (gemeinsam mit topic.ts genutzt) und werden oben importiert.

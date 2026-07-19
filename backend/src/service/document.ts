@@ -1,13 +1,97 @@
 import { db } from "../db/index.ts";
-import { documents, chunks, wikiPages, activityLogs } from "../db/schema.ts";
-import { eq, desc, and, sql } from "drizzle-orm";
+import {
+  documents,
+  chunks,
+  wikiPages,
+  activityLogs,
+  documentTopics,
+} from "../db/schema.ts";
+import { eq, desc, asc, and, sql, ilike, gte, lte, inArray } from "drizzle-orm";
 
-export async function listDocuments(workspaceId: string) {
+export type DocumentSort =
+  | "created_desc"
+  | "created_asc"
+  | "published_desc"
+  | "published_asc"
+  | "title_asc"
+  | "title_desc";
+
+export interface ListDocumentsOptions {
+  type?: string;
+  channel?: string;
+  query?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+  topicIds?: string[];
+  sort?: DocumentSort;
+}
+
+export async function listDocuments(
+  workspaceId: string,
+  opts: ListDocumentsOptions = {},
+) {
+  const conditions = [eq(documents.workspace_id, workspaceId)];
+  if (opts.type) conditions.push(eq(documents.type, opts.type));
+  if (opts.channel) conditions.push(eq(documents.channel, opts.channel));
+  if (opts.query) conditions.push(ilike(documents.title, `%${opts.query}%`));
+  // Datumsbereich filtert auf das Import-Datum (created_at, immer vorhanden).
+  if (opts.dateFrom) conditions.push(gte(documents.created_at, opts.dateFrom));
+  if (opts.dateTo) conditions.push(lte(documents.created_at, opts.dateTo));
+  // Themen-Filter (Ebene 1): Dokumente mit einem der Themen (Subquery auf Junction).
+  if (opts.topicIds && opts.topicIds.length > 0) {
+    conditions.push(
+      inArray(
+        documents.id,
+        db
+          .select({ id: documentTopics.document_id })
+          .from(documentTopics)
+          .where(inArray(documentTopics.topic_id, opts.topicIds)),
+      ),
+    );
+  }
+
+  const orderBy = (() => {
+    switch (opts.sort) {
+      case "created_asc":
+        return asc(documents.created_at);
+      // published_at kann null sein (nicht-YouTube / Altbestand) → NULLS LAST,
+      // damit Videos mit Datum vorne stehen.
+      case "published_desc":
+        return sql`${documents.published_at} desc nulls last`;
+      case "published_asc":
+        return sql`${documents.published_at} asc nulls last`;
+      case "title_asc":
+        return asc(documents.title);
+      case "title_desc":
+        return desc(documents.title);
+      case "created_desc":
+      default:
+        return desc(documents.created_at);
+    }
+  })();
+
   return await db
     .select()
     .from(documents)
-    .where(eq(documents.workspace_id, workspaceId))
-    .orderBy(desc(documents.created_at));
+    .where(and(...conditions))
+    .orderBy(orderBy);
+}
+
+/** Distinct-Kanäle eines Workspace (für das Kanal-Filter-Dropdown). */
+export async function listChannels(workspaceId: string): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ channel: documents.channel })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.workspace_id, workspaceId),
+        sql`${documents.channel} is not null and ${documents.channel} <> ''`,
+      ),
+    );
+  return rows
+    .map((r) => r.channel as string)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "de"));
 }
 
 export async function getDocument(id: string) {
@@ -30,10 +114,32 @@ export async function createDocument(data: {
   file_path?: string;
   file_size?: number;
   file_hash?: string;
+  channel?: string | null;
+  published_at?: Date | null;
+  duration?: number | null;
+  source_metadata?: Record<string, unknown>;
   created_by: number;
 }) {
   const [doc] = await db.insert(documents).values(data).returning();
   return doc;
+}
+
+/** Aktualisiert die Herkunfts-Metadaten (Ebene 2, z.B. YouTube-Refresh). */
+export async function updateDocumentMetadata(
+  id: string,
+  data: {
+    channel?: string | null;
+    published_at?: Date | null;
+    duration?: number | null;
+    source_metadata?: Record<string, unknown>;
+  },
+) {
+  const [doc] = await db
+    .update(documents)
+    .set({ ...data, updated_at: new Date() })
+    .where(eq(documents.id, id))
+    .returning();
+  return doc || null;
 }
 
 export async function updateDocumentStatus(
@@ -87,6 +193,8 @@ export async function deleteDocument(id: string) {
     .update(activityLogs)
     .set({ document_id: null })
     .where(eq(activityLogs.document_id, id));
+  // Themen-Zuordnungen entfernen (FK ohne Cascade).
+  await db.delete(documentTopics).where(eq(documentTopics.document_id, id));
   await db.delete(chunks).where(eq(chunks.document_id, id));
   await db.delete(documents).where(eq(documents.id, id));
 }
