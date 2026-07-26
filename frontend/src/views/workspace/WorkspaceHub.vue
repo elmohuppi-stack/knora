@@ -239,23 +239,31 @@ function switchWorkspace() {
 }
 
 @media (max-width: 768px) {
+  /* Alles in EINER Zeile: "← Übersicht" + Workspace-Select. Der h3-Titel ist
+     mit der Select-Box redundant (zeigt denselben Namen) und wird ausgeblendet,
+     um oben Platz für die Inhalte zu sparen. */
   .hub-header {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    align-items: center;
     gap: 0.6rem;
-    padding: 0.75rem 1rem;
+    padding: 0.6rem 1rem;
   }
   .hub-header-left {
     gap: 0.6rem;
+    flex-shrink: 0;
   }
   .hub-header-left h3 {
-    font-size: 1.1rem;
+    display: none;
+  }
+  .back-link {
+    white-space: nowrap;
   }
   .hub-header-actions {
-    justify-content: flex-end;
+    flex: 1;
+    min-width: 0;
   }
   .ws-switch {
-    flex: 1;
+    width: 100%;
     min-width: 0;
   }
   .hub-tabs {

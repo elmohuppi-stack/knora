@@ -11,17 +11,21 @@
         />
       </div>
 
-      <!-- Im Reader-Modus einklappbar; in Discovery immer offen -->
+      <!-- Einklappbar im Reader-Modus (Desktop) und generell auf Mobile
+           (Accordion); in der Desktop-Discovery-Ansicht immer offen. -->
       <button
-        v-if="selectedPage"
+        v-if="selectedPage || isMobile"
         class="rail-toggle"
         @click="showFacets = !showFacets"
       >
-        <span>{{ showFacets ? "▾" : "▸" }} Filter</span>
+        <span>{{ showFacets ? "▾" : "▸" }} Filter &amp; Sortierung</span>
         <span v-if="activeFilterCount" class="cnt">{{ activeFilterCount }}</span>
       </button>
 
-      <div class="rail-facets" v-show="!selectedPage || showFacets">
+      <div
+        class="rail-facets"
+        v-show="showFacets || (!selectedPage && !isMobile)"
+      >
         <div class="facet-group">
           <div class="facet-label">Typ</div>
           <div class="type-facets">
@@ -412,7 +416,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { useWorkspace } from "../../composables/useWorkspace";
@@ -444,6 +448,14 @@ const filterReferences = ref("");
 const refLabel = ref("");
 const topConceptsList = ref<any[]>([]);
 const showFacets = ref(false);
+// Auf Mobile sind die Filter standardmäßig eingeklappt (Accordion), damit die
+// Artikel-Kacheln sofort sichtbar sind. Auf Desktop bleiben die Facetten in der
+// Discovery-Ansicht immer offen (Sidebar).
+const isMobile = ref(false);
+let mobileMq: MediaQueryList | null = null;
+const syncMobile = () => {
+  isMobile.value = mobileMq?.matches ?? false;
+};
 
 const pages = ref<any[]>([]);
 const total = ref(0);
@@ -526,6 +538,15 @@ const dateRangeLabel = computed(() => {
 const selectedTopics = computed(() =>
   allTopics.value.filter((t) => filterTopicIds.value.includes(t.id)),
 );
+
+onMounted(() => {
+  mobileMq = window.matchMedia("(max-width: 768px)");
+  syncMobile();
+  mobileMq.addEventListener("change", syncMobile);
+});
+onUnmounted(() => {
+  mobileMq?.removeEventListener("change", syncMobile);
+});
 
 onMounted(async () => {
   if (!auth.isAuthenticated) {
@@ -1796,6 +1817,16 @@ function closeImport() {
     width: 100%;
     min-width: 0;
     border-right: none;
+  }
+  /* Filter-Accordion: prominenter, gut tippbarer Header */
+  .rail-toggle {
+    font-size: 0.95rem;
+    font-weight: 600;
+    padding: 0.85rem 1rem;
+  }
+  /* Eingeklappt keine doppelte Trennlinie unter dem Accordion */
+  .rail-facets {
+    padding: 0.85rem 1rem 1rem;
   }
   .wiki-main {
     padding: 1rem 1.1rem;

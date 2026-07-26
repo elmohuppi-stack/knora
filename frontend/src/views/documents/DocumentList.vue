@@ -284,31 +284,6 @@
           </div>
         </div>
 
-        <div class="field">
-          <label>Wiki-Tiefe</label>
-          <div class="wiki-depth-options">
-            <label
-              v-for="opt in wikiDepthOptions"
-              :key="opt.value"
-              :class="['depth-row', { active: editWikiDepth === opt.value }]"
-            >
-              <input
-                type="radio"
-                name="wiki-depth"
-                :value="opt.value"
-                v-model="editWikiDepth"
-              />
-              <span class="depth-title">{{ opt.title }}</span>
-              <span class="depth-desc">{{ opt.desc }}</span>
-            </label>
-          </div>
-          <p class="field-hint">
-            Steuert, wie viel Wiki beim Import (v. a. großer Dokumente) erzeugt
-            wird — Aufwand/Kosten gegen Detailtiefe. Greift ab dem nächsten
-            Import.
-          </p>
-        </div>
-
         <!-- Themen-Verwaltung (Ebene 1) -->
         <div class="field">
           <label>Themen</label>
@@ -365,6 +340,33 @@
             Wiki-Konzepten.
           </p>
           <p v-if="topicError" class="error">{{ topicError }}</p>
+        </div>
+
+        <div class="field">
+          <label>Wiki-Tiefe</label>
+          <div class="wiki-depth-options">
+            <label
+              v-for="opt in wikiDepthOptions"
+              :key="opt.value"
+              :class="['depth-row', { active: editWikiDepth === opt.value }]"
+            >
+              <input
+                type="radio"
+                name="wiki-depth"
+                :value="opt.value"
+                v-model="editWikiDepth"
+              />
+              <span class="depth-text">
+                <span class="depth-title">{{ opt.title }}</span>
+                <span class="depth-desc">{{ opt.desc }}</span>
+              </span>
+            </label>
+          </div>
+          <p class="field-hint">
+            Steuert, wie viel Wiki beim Import (v. a. großer Dokumente) erzeugt
+            wird — Aufwand/Kosten gegen Detailtiefe. Greift ab dem nächsten
+            Import.
+          </p>
         </div>
 
         <div class="dialog-actions">
@@ -1100,18 +1102,27 @@ function formatDate(dateStr: string) {
   gap: 0.4rem;
 }
 .depth-row {
-  display: grid;
-  grid-template-columns: auto auto 1fr;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.5rem 0.6rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.6rem 0.7rem;
   border: 1px solid var(--color-border);
   border-radius: 6px;
   cursor: pointer;
 }
+.depth-row input {
+  margin: 0.15rem 0 0;
+  flex-shrink: 0;
+}
 .depth-row.active {
   border-color: var(--color-primary);
   background: var(--color-bg-secondary);
+}
+.depth-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
 }
 .depth-title {
   font-size: 0.85rem;
@@ -1119,6 +1130,7 @@ function formatDate(dateStr: string) {
 }
 .depth-desc {
   font-size: 0.75rem;
+  line-height: 1.4;
   color: var(--color-text-secondary);
 }
 .field-hint {
