@@ -52,10 +52,11 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
 
 const email = ref("");
@@ -69,7 +70,8 @@ async function handleSubmit() {
   loading.value = true;
   try {
     await auth.login(email.value, password.value);
-    router.push("/chat");
+    const redirect = route.query.redirect;
+    router.push(typeof redirect === "string" ? redirect : "/chat");
   } catch (e: any) {
     error.value =
       e.response?.data?.error || e.message || "Fehler bei der Anmeldung";
