@@ -1,6 +1,18 @@
 import { db } from "../db/index.ts";
-import { workspaces, workspaceMembers } from "../db/schema.ts";
-import { eq, and, desc, like, or, sql } from "drizzle-orm";
+import {
+  workspaces,
+  workspaceMembers,
+  documents,
+  documentTopics,
+  topics,
+  chunks,
+  wikiPages,
+  wikiPageRevisions,
+  chatSessions,
+  chatMessages,
+  activityLogs,
+} from "../db/schema.ts";
+import { eq, and, desc, like, or, sql, inArray } from "drizzle-orm";
 
 /** Generiert einen URL-freundlichen Slug aus einem Namen */
 export function slugify(name: string): string {
@@ -110,7 +122,55 @@ export async function updateWorkspace(
 }
 
 export async function deleteWorkspace(id: string) {
-  await db.delete(workspaces).where(eq(workspaces.id, id));
+  // Die abhängigen Tabellen haben Foreign Keys auf workspaces.id OHNE
+  // ON DELETE CASCADE. Ein reines DELETE auf workspaces schlägt daher mit
+  // einer FK-Verletzung fehl (500). Deshalb hier alle Kinder in FK-sicherer
+  // Reihenfolge in EINER Transaktion löschen (Kinder vor Eltern).
+  await db.transaction(async (tx) => {
+    // Sub-Selects für die indirekt (über documents/chat_sessions) verknüpften
+    // Tabellen. Alle betroffenen Zeilen gehören zu genau diesem Workspace.
+    const docIds = tx
+      .select({ id: documents.id })
+      .from(documents)
+      .where(eq(documents.workspace_id, id));
+    const sessionIds = tx
+      .select({ id: chatSessions.id })
+      .from(chatSessions)
+      .where(eq(chatSessions.workspace_id, id));
+
+    await tx
+      .delete(chatMessages)
+      .where(inArray(chatMessages.session_id, sessionIds));
+    await tx.delete(chatSessions).where(eq(chatSessions.workspace_id, id));
+
+    await tx
+      .delete(wikiPageRevisions)
+      .where(eq(wikiPageRevisions.workspace_id, id));
+    await tx.delete(wikiPages).where(eq(wikiPages.workspace_id, id));
+
+    await tx
+      .delete(documentTopics)
+      .where(inArray(documentTopics.document_id, docIds));
+    await tx.delete(chunks).where(eq(chunks.workspace_id, id));
+    await tx.delete(topics).where(eq(topics.workspace_id, id));
+
+    // activity_logs referenziert workspaces.id UND documents.id → vor documents
+    // löschen und beide Bezüge abdecken (auch Logs mit nur document_id).
+    await tx
+      .delete(activityLogs)
+      .where(
+        or(
+          eq(activityLogs.workspace_id, id),
+          inArray(activityLogs.document_id, docIds),
+        ),
+      );
+    await tx.delete(documents).where(eq(documents.workspace_id, id));
+
+    await tx
+      .delete(workspaceMembers)
+      .where(eq(workspaceMembers.workspace_id, id));
+    await tx.delete(workspaces).where(eq(workspaces.id, id));
+  });
 }
 
 export async function listMembers(workspaceId: string) {

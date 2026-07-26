@@ -74,8 +74,16 @@ workspaceRouter.put("/:id", zValidator("json", updateSchema), async (c) => {
 // Workspace löschen
 workspaceRouter.delete("/:id", async (c) => {
   const id = c.req.param("id");
-  await workspaceService.deleteWorkspace(id);
-  return c.json({ success: true });
+  try {
+    await workspaceService.deleteWorkspace(id);
+    return c.json({ success: true });
+  } catch (e: any) {
+    console.error("[workspace] Löschen fehlgeschlagen:", e);
+    return c.json(
+      { error: "Workspace konnte nicht gelöscht werden", detail: e.message },
+      500,
+    );
+  }
 });
 
 // Mitglieder auflisten
