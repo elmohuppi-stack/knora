@@ -120,7 +120,7 @@
           @keydown.enter.exact.prevent="sendMessage"
           @input="autoGrow"
           rows="1"
-          placeholder="Nachricht eingeben... (Enter = senden, Shift+Enter = neue Zeile)"
+          :placeholder="inputPlaceholder"
           class="msg-input"
           :disabled="isStreaming"
         ></textarea>
@@ -198,7 +198,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { useConfirm } from "../../composables/useConfirm";
@@ -242,13 +242,36 @@ const sessionId = ref<string | null>(null);
 // Steuert den ausklappbaren Verlauf-Drawer auf dem Handy
 const historyOpen = ref(false);
 
+// In eine schmale Textarea passt der lange Tastatur-Hinweis nicht: er würde
+// umbrechen und – da das Feld nur eine Zeile hoch ist – abgeschnitten wirken.
+// Darum ab ca. 440px Feldbreite den kurzen Platzhalter zeigen.
+const inputWidth = ref(0);
+let inputObserver: ResizeObserver | null = null;
+const inputPlaceholder = computed(() =>
+  inputWidth.value && inputWidth.value < 440
+    ? "Nachricht eingeben..."
+    : "Nachricht eingeben... (Enter = senden, Shift+Enter = neue Zeile)",
+);
+
 onMounted(() => {
+  if (inputRef.value) {
+    inputWidth.value = inputRef.value.clientWidth;
+    inputObserver = new ResizeObserver((entries) => {
+      inputWidth.value = entries[0].target.clientWidth;
+    });
+    inputObserver.observe(inputRef.value);
+  }
+
   if (!auth.isAuthenticated) {
     router.push("/login");
     return;
   }
   loadWorkspaces();
   loadSessions();
+});
+
+onUnmounted(() => {
+  inputObserver?.disconnect();
 });
 
 async function loadWorkspaces() {
@@ -483,6 +506,9 @@ async function generateArticleCluster() {
 
 <style scoped>
 .chat-layout {
+  /* Feste Höhe (statt mitwachsend), damit nur die Nachrichtenliste scrollt und
+     die Eingabeleiste immer unten sichtbar bleibt. */
+  height: 100%;
   flex: 1;
   display: flex;
   min-height: 0;
@@ -740,6 +766,7 @@ async function generateArticleCluster() {
 
 .messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 1rem 1.5rem;
 }

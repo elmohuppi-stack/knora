@@ -222,6 +222,8 @@ body {
 .app-layout {
   display: flex;
   height: 100vh;
+  /* dvh: auf dem Handy die tatsächlich sichtbare Höhe (Adressleiste/Tastatur) */
+  height: 100dvh;
 }
 
 /* Sidebar */
@@ -470,8 +472,9 @@ button {
   }
 
   .app-content {
-    /* Platz für die fixe Bottom-Nav (56px) + etwas Luft */
-    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    /* Platz für die fixe Bottom-Nav (56px) + die eingeklappte Log-Leiste (2rem),
+       damit unten angedockte Elemente (z.B. die Chat-Eingabe) frei bleiben */
+    padding-bottom: calc(56px + 2rem + env(safe-area-inset-bottom, 0px));
   }
 
   .mobile-nav {
