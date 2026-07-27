@@ -209,7 +209,7 @@ Anders als [WeKnora](https://github.com/Tencent/WeKnora) (Enterprise-Knowledge-B
 ├──────────────────────────────────────────────────────────┤
 │  PostgreSQL + pgvector (Vektoren + Volltext in einer DB) │
 │  Lokales Filesystem (Uploads)                             │
-│  [Optional] MarkItDown Parser (Python, per Profile)       │
+│  MarkItDown Parser (Python) – läuft immer mit             │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -360,14 +360,15 @@ export const wikiPages = pgTable("wiki_pages", {
 - [x] **Filter & Facetten**: Dokumente- und Wiki-Liste nach Typ, Kanal, Datumsbereich, Volltext filter-/sortierbar (Datepicker); Filter-State in der URL
 - [x] **Adaptives Wiki-Layout**: Discovery (Facetten-Rail + Karten-Grid) ↔ Reader; Desktop-Verallgemeinerung des Mobile-Master/Detail
 - [x] **Themen pro Workspace** (`topics` + `document_topics`): datenbasierte Vorschläge aus Concepts (LLM-Clustering), Auto-Klassifikation beim Ingest + Backfill (`backfill-topics.ts`), manuelle Zuweisung/Korrektur, Filter-Chips
-- [x] **Artikel-Bearbeitung** (Ebene 4): Markdown-Editor mit Link-Toolbar (`[[intern]]` + `[extern](https://)`), **Versionshistorie** (`wiki_page_revisions`, Snapshot + Wiederherstellen) und **Lock** (`manually_edited` – Auto-Generierung überschreibt Handedits nicht). *TipTap ist installiert für ein späteres WYSIWYG-Upgrade, v1 nutzt Markdown.*
+- [x] **Artikel-Bearbeitung** (Ebene 4): einfacher Markdown-Editor (Titel/Summary/Inhalt in `WikiPage.vue`); **Versionshistorie** (`wiki_page_revisions`, Snapshot + Restore-Endpoint) und **Lock** (`manually_edited` – Auto-Generierung überschreibt Handedits nicht) sind backend-seitig umgesetzt, das Frontend zeigt aktuell die Versionsnummer. *TipTap ist als Dependency installiert für ein späteres WYSIWYG-Upgrade, aber noch nicht im UI verdrahtet.*
 - [x] **Backlink-Filter** (Ebene 3): Concept/Entity → alle referenzierenden Artikel; „Top-Konzepte"-Facette; Sortierung „Meiste Verknüpfungen"
 - [x] **Wiki-Graph** (D3-Force, neu gebaut): Fokus-Subgraph statt Hairball (ohne Fokus Top-Konzepte-Wolke, Klick → 1-Hop-Subgraph), Zoom/Pan, Typ-Filter, Such-Fokus; **Klick auf Knoten → Seiten-Drawer mit vollem Artikel** + „Nachbarn zeigen"/„Im Wiki öffnen"
-- [x] **Wiki-Tiefe-Selektor** in den Workspace-Einstellungen (statt funktionsloser Indexing-Checkboxen)
+- [x] **Wiki-Tiefe-Selektor** in den Workspace-Einstellungen (im Dokumente-View, `DocumentList.vue`) — schreibt `wiki_config.wiki_depth` via `PUT /api/v1/workspaces/:id`
+- [x] **URL-Import**: Webseite via `POST /documents/import-url` laden (Browser-Header, Redirect-Follow), durch den MarkItDown-Parser zu Markdown → Chunks/Embeddings; läuft asynchron als Hintergrund-Task
+- [x] **Activity-Log** (`activity_log` + Router `activity.ts` / Service `activity-log.ts`): workspace-gefilterte Aktivitäten (Import/Wiki-Generierung etc.), dezente App-weite Log-Leiste (`ActivityBar.vue`)
 
 ### 🔜 Offen / optional
 
-- [ ] URL-Import: Webseite scrapen → Markdown → Chunks
 - [ ] Dokumenten-Preview (PDF, Markdown) in der UI
 - [ ] Conversation-Strategy konfigurierbar (thresholds, fallback, rewrite)
 - [ ] Web-Suche-Integration

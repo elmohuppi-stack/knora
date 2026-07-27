@@ -21,12 +21,14 @@ Stell Fragen via RAG-Chat **und** bekomme ein automatisch generiertes, verlinkte
 | **📖 Wiki-Generierung**  | LLM erstellt Summary-/Entity-/Concept-Seiten – **kapitelweise über das ganze Dokument** (nicht nur den Anfang) |
 | **🎚️ Wiki-Tiefe**        | Pro Workspace steuerbar (`full`/`capped`/`summary`/`off`) – Kosten vs. Detailtiefe bei großen Dokumenten |
 | **🔗 Verlinktes Wiki**   | `[[Slug]]`-Links zwischen Wiki-Seiten                |
-| **✏️ Artikel-Editor**    | Markdown-Editor mit Link-Toolbar, **Versionshistorie** & **Lock** (Auto-Generierung überschreibt Handedits nicht) |
+| **✏️ Artikel-Editor**    | Markdown-Editor (Titel/Summary/Inhalt); **Versionshistorie** & **Lock** backend-seitig (`wiki_page_revisions`, Restore-Endpoint, `manually_edited` – Auto-Generierung überschreibt Handedits nicht) |
 | **🎛️ Filter & Facetten** | Dokumente/Wiki nach Typ, Kanal, Datum, Volltext filtern & sortieren; adaptives Discovery-Layout (Karten-Grid) |
 | **🏷️ Themen pro Workspace** | Datenbasierte Themen-Vorschläge (LLM-Clustering der Konzepte), Auto-Klassifikation + manuelle Zuweisung, Themen-Filter |
 | **🔎 Backlink-Filter**   | Concept/Entity → alle referenzierenden Artikel; „Top-Konzepte"-Facette |
 | **🕸️ Wiki-Graph**        | D3-Force-Graph: Fokus-Subgraph (statt Hairball), Klick auf Knoten → Seiten-Panel mit Artikel |
 | **🎥 YouTube-Import**    | Transkript → automatische Wiki-Seite; Kanal/Datum/Dauer/Tags als Metadaten |
+| **🌐 URL-Import**        | Webseite laden (Browser-Header, Redirect-Follow) → MarkItDown → Markdown → Chunks, asynchron im Hintergrund |
+| **📊 Activity-Log**      | Workspace-gefilterte Aktivitäten (Import, Wiki-Generierung …) in einer dezenten App-weiten Log-Leiste |
 | **📥 WeKnora-Migration** | Dokumente, generierte Artikel & Embeddings 1:1 übernehmen |
 | **📱 Responsive**        | Handy-taugliche UI: Bottom-Nav, Master/Detail-Wiki, Chat-Verlauf als Drawer |
 | **🔐 Auth**              | JWT + bcrypt, Rollen: Admin / Editor / Viewer        |
@@ -45,7 +47,7 @@ Stell Fragen via RAG-Chat **und** bekomme ein automatisch generiertes, verlinkte
 | **ORM**          | [Drizzle](https://orm.drizzle.team)                                                         |
 | **Datenbank**    | [PostgreSQL](https://www.postgresql.org) + [pgvector](https://github.com/pgvector/pgvector) |
 | **LLM**          | [Vercel AI SDK](https://sdk.vercel.ai/docs) (SSE-Streaming)                                 |
-| **Wiki-Editor**  | Markdown-Editor mit Link-Toolbar ([TipTap](https://tiptap.dev) installiert für späteres WYSIWYG) |
+| **Wiki-Editor**  | Einfacher Markdown-Editor ([TipTap](https://tiptap.dev) als Dependency installiert für späteres WYSIWYG, noch nicht im UI verdrahtet) |
 | **Wiki-Graph**   | [D3.js](https://d3js.org) (d3-force)                                                        |
 | **Shared Types** | `packages/shared/` (TypeScript End-to-End)                                                  |
 
@@ -126,10 +128,12 @@ knora/
 │   │   │   ├── auth.ts
 │   │   │   ├── admin.ts
 │   │   │   ├── workspace.ts
-│   │   │   ├── document.ts
+│   │   │   ├── document.ts    # Upload, URL-Import, YouTube
 │   │   │   ├── chat.ts
 │   │   │   ├── wiki.ts
 │   │   │   ├── search.ts
+│   │   │   ├── topic.ts       # Themen pro Workspace
+│   │   │   ├── activity.ts    # Activity-Log
 │   │   │   └── model.ts
 │   │   ├── service/          # Business-Logik
 │   │   │   ├── auth.ts
@@ -159,8 +163,10 @@ knora/
 │   │   │   ├── workspace/
 │   │   │   └── admin/
 │   │   └── components/       # Wiederverwendbare Komponenten
-│   │       ├── editor/       # TipTap
-│   │       └── wiki-graph/   # D3.js
+│   │       ├── ActivityBar.vue  # App-weite Activity-Log-Leiste
+│   │       └── ConfirmModal.vue
+│   │   #  Artikel-Editor (Markdown-Textarea): views/wiki/WikiPage.vue
+│   │   #  Wiki-Graph (D3-Force): views/wiki/GraphView.vue
 │   ├── nginx.conf
 │   └── Dockerfile
 │
@@ -295,9 +301,9 @@ Kurzfassung:
 
 ## 📋 Status
 
-Kernfunktionen sind implementiert und live: Auth, Workspaces, Dokument-Import (inkl. Parser für PDF/DOCX, auch große Dateien), hybride Suche, RAG-Chat mit Streaming & Historie, kapitelbasierte Wiki-Generierung über das ganze Dokument mit steuerbarer Wiki-Tiefe, TipTap-Editor, Wiki-Graph, YouTube-Import und die WeKnora-Migration.
+Kernfunktionen sind implementiert und live: Auth, Workspaces, Dokument-Import (Upload, URL-Scraping, YouTube; inkl. Parser für PDF/DOCX, auch große Dateien), hybride Suche, RAG-Chat mit Streaming & Historie, kapitelbasierte Wiki-Generierung über das ganze Dokument mit im Frontend steuerbarer Wiki-Tiefe, Markdown-Artikel-Editor, Wiki-Graph, Filter/Themen/Backlinks, Activity-Log und die WeKnora-Migration.
 
-Offen / optional: `wiki_depth`-Auswahl im Frontend (aktuell via API), URL-Scraping-Import, Knowledge-Graph-Pipeline (`graph_enabled`), Web-Suche.
+Offen / optional: Dokumenten-Preview (PDF/Markdown) in der UI, Knowledge-Graph-Pipeline (`graph_enabled`), Web-Suche.
 
 Details & Architektur: [`docs/PLAN.md`](docs/PLAN.md)
 
