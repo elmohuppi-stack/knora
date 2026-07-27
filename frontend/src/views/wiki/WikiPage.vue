@@ -50,6 +50,8 @@
 
     <!-- View Mode -->
     <div v-if="page && !editing" class="wiki-article">
+      <SpeechBar :article="page" :article-key="page.slug" />
+
       <div class="article-summary" v-if="page.summary">
         {{ stripWikiLinks(page.summary) }}
       </div>
@@ -101,6 +103,7 @@ import { useAuthStore } from "../../stores/auth";
 import { useWorkspace } from "../../composables/useWorkspace";
 import { useConfirm } from "../../composables/useConfirm";
 import ConfirmModal from "../../components/ConfirmModal.vue";
+import SpeechBar from "../../components/SpeechBar.vue";
 import axios from "axios";
 import { marked } from "marked";
 import DOMPurify from "dompurify";

@@ -23,6 +23,7 @@ Stell Fragen via RAG-Chat **und** bekomme ein automatisch generiertes, verlinkte
 | **🎚️ Wiki-Tiefe**        | Pro Workspace steuerbar (`full`/`capped`/`summary`/`off`) – Kosten vs. Detailtiefe bei großen Dokumenten |
 | **🔗 Verlinktes Wiki**   | `[[Slug]]`-Links zwischen Wiki-Seiten                |
 | **✏️ Artikel-Editor**    | Markdown-Editor (Titel/Summary/Inhalt); **Versionshistorie** & **Lock** backend-seitig (`wiki_page_revisions`, Restore-Endpoint, `manually_edited` – Auto-Generierung überschreibt Handedits nicht) |
+| **🔊 Vorlesen**          | Ganze Artikel per Browser-Stimme vorlesen (Web Speech API, kein Backend/keine Kosten): Play/Pause, Absatz vor/zurück, Tempo & Stimme wählbar. Markdown wird für die Sprachausgabe aufbereitet – `[[Links]]` als Klartext, URLs raus, Code/Tabellen werden angesagt statt vorgelesen |
 | **🎛️ Filter & Facetten** | Dokumente/Wiki nach Typ, Kanal, Datum, Volltext filtern & sortieren; adaptives Discovery-Layout (Karten-Grid) |
 | **🏷️ Themen pro Workspace** | Datenbasierte Themen-Vorschläge (LLM-Clustering der Konzepte), Auto-Klassifikation + manuelle Zuweisung, Themen-Filter |
 | **🔎 Backlink-Filter**   | Concept/Entity → alle referenzierenden Artikel; „Top-Konzepte"-Facette |

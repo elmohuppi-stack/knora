@@ -272,6 +272,12 @@
           </div>
         </div>
 
+        <SpeechBar
+          v-if="!editing"
+          :article="selectedPage"
+          :article-key="selectedSlug"
+        />
+
         <div
           v-if="!editing"
           class="reader-body"
@@ -441,6 +447,7 @@ import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { useWorkspace } from "../../composables/useWorkspace";
 import DatePicker from "primevue/datepicker";
+import SpeechBar from "../../components/SpeechBar.vue";
 import axios from "axios";
 
 const auth = useAuthStore();
