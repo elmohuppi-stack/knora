@@ -159,6 +159,26 @@
           </div>
         </div>
 
+        <!-- Offene Chat-Verbund-Entwürfe: Hinweis + Zurück ins Review -->
+        <div v-if="draftClusters.length" class="draft-banner">
+          <div class="draft-banner-head">
+            <i class="pi pi-file-edit"></i>
+            <span>
+              {{ draftClusters.length }} unveröffentlichte(r) Artikel-Verbund aus
+              dem Chat – noch nicht im Wiki sichtbar.
+            </span>
+          </div>
+          <ul class="draft-list">
+            <li v-for="dc in draftClusters" :key="dc.cluster_id">
+              <span class="draft-title">{{ dc.title }}</span>
+              <span class="draft-meta">{{ dc.count }} Artikel</span>
+              <button class="draft-open" @click="openReview(dc.cluster_id)">
+                Review öffnen →
+              </button>
+            </li>
+          </ul>
+        </div>
+
         <div v-if="!hasActiveFilters && stats.length" class="stats-band">
           <button
             class="stat-card"
@@ -568,6 +588,7 @@ onMounted(async () => {
       loadChannels(),
       loadTopics(),
       loadTopConcepts(),
+      loadDraftClusters(),
     ]);
     await loadPages();
     if (urlSlug.value) await loadPageBySlug(urlSlug.value);
@@ -622,6 +643,26 @@ async function loadIndex() {
   } catch {
     /* no index yet */
   }
+}
+
+const draftClusters = ref<
+  { cluster_id: string; title: string; count: number; created_at: string }[]
+>([]);
+
+async function loadDraftClusters() {
+  if (!workspaceId.value) return;
+  try {
+    const res = await axios.get(
+      `/api/v1/wiki/${workspaceId.value}/draft-clusters`,
+    );
+    draftClusters.value = res.data.clusters || [];
+  } catch {
+    /* ignore */
+  }
+}
+
+function openReview(clusterId: string) {
+  router.push(`/workspaces/${workspaceId.value}/wiki-review/${clusterId}`);
 }
 
 async function loadStats() {
@@ -1338,6 +1379,58 @@ function closeImport() {
 }
 .chip button:hover {
   color: var(--color-text);
+}
+
+/* Hinweis auf offene Chat-Verbund-Entwürfe */
+.draft-banner {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+}
+.draft-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #9a3412;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.draft-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.draft-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.draft-title {
+  font-weight: 600;
+  color: var(--color-text);
+}
+.draft-meta {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+.draft-open {
+  margin-left: auto;
+  background: #ea580c;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.draft-open:hover {
+  opacity: 0.9;
 }
 
 .stats-band {

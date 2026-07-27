@@ -17,8 +17,9 @@ Stell Fragen via RAG-Chat **und** bekomme ein automatisch generiertes, verlinkte
 | ----------------------- | ---------------------------------------------------- |
 | **📄 Dokument-Import**   | Markdown, Text, PDF, DOCX, HTML u.a. über den Parser-Service – auch **große Dateien** (Upload-/Timeout-/RAM-Limits angehoben) |
 | **🔍 Hybride Suche**     | Vektor-Embeddings (pgvector) + Volltext (tsvector)   |
-| **💬 RAG Chat**          | Frage zu deinen Dokumenten mit Quellenangaben, SSE-Streaming, Historie |
+| **💬 RAG Chat**          | Frage zu deinen Dokumenten mit Quellenangaben, SSE-Streaming, **Gesprächsverlauf-Kontext** & Historie (Sessions löschbar) |
 | **📖 Wiki-Generierung**  | LLM erstellt Summary-/Entity-/Concept-Seiten – **kapitelweise über das ganze Dokument** (nicht nur den Anfang) |
+| **🧩 Chat → Wiki-Verbund** | Aus einem Gespräch einen ganzen Artikel-Verbund erzeugen: **1 Summary + n Concepts + m Entities**, untereinander verlinkt. Zielgruppe/Stil/Umfang im Chat entwickeln; das Transkript wird als Quell-Dokument gespeichert; Entwürfe im Review prüfen & veröffentlichen |
 | **🎚️ Wiki-Tiefe**        | Pro Workspace steuerbar (`full`/`capped`/`summary`/`off`) – Kosten vs. Detailtiefe bei großen Dokumenten |
 | **🔗 Verlinktes Wiki**   | `[[Slug]]`-Links zwischen Wiki-Seiten                |
 | **✏️ Artikel-Editor**    | Markdown-Editor (Titel/Summary/Inhalt); **Versionshistorie** & **Lock** backend-seitig (`wiki_page_revisions`, Restore-Endpoint, `manually_edited` – Auto-Generierung überschreibt Handedits nicht) |
@@ -141,6 +142,7 @@ knora/
 │   │   │   ├── embedding.ts
 │   │   │   ├── search.ts
 │   │   │   ├── wiki.ts
+│   │   │   ├── wiki-from-chat.ts  # Chat → Artikel-Verbund
 │   │   │   └── ...
 │   │   └── scripts/
 │   │       ├── weknora-db-import.ts  # WeKnora DB-Migration (Docs, Wiki, Embeddings)
@@ -301,7 +303,7 @@ Kurzfassung:
 
 ## 📋 Status
 
-Kernfunktionen sind implementiert und live: Auth, Workspaces, Dokument-Import (Upload, URL-Scraping, YouTube; inkl. Parser für PDF/DOCX, auch große Dateien), hybride Suche, RAG-Chat mit Streaming & Historie, kapitelbasierte Wiki-Generierung über das ganze Dokument mit im Frontend steuerbarer Wiki-Tiefe, Markdown-Artikel-Editor, Wiki-Graph, Filter/Themen/Backlinks, Activity-Log und die WeKnora-Migration.
+Kernfunktionen sind implementiert und live: Auth, Workspaces, Dokument-Import (Upload, URL-Scraping, YouTube; inkl. Parser für PDF/DOCX, auch große Dateien), hybride Suche, RAG-Chat mit Streaming, Verlaufskontext & Historie, kapitelbasierte Wiki-Generierung über das ganze Dokument mit im Frontend steuerbarer Wiki-Tiefe, Chat→Wiki-Artikel-Verbund (Entwurf/Review), Markdown-Artikel-Editor, Wiki-Graph, Filter/Themen/Backlinks, Activity-Log und die WeKnora-Migration.
 
 Offen / optional: Dokumenten-Preview (PDF/Markdown) in der UI, Knowledge-Graph-Pipeline (`graph_enabled`), Web-Suche.
 

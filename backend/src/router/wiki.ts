@@ -3,6 +3,8 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { authMiddleware } from "../middleware/auth.ts";
 import * as wikiService from "../service/wiki.ts";
+import * as chatWiki from "../service/wiki-from-chat.ts";
+import * as activityLog from "../service/activity-log.ts";
 
 const wikiRouter = new Hono();
 wikiRouter.use("*", authMiddleware);
@@ -47,6 +49,9 @@ wikiRouter.get("/:workspaceId/pages", async (c) => {
 
   const result = await wikiService.listPages(workspaceId, {
     page_type: q.page_type || undefined,
+    // Standardmäßig nur veröffentlichte Seiten; Entwürfe (Chat-Verbund) bleiben
+    // dem Review-Endpoint vorbehalten. Explizites ?status=… überschreibt das.
+    status: q.status || "published",
     query: q.query || undefined,
     source_document_id: q.source_document_id || undefined,
     channel: q.channel || undefined,
@@ -81,6 +86,85 @@ wikiRouter.get("/:workspaceId/concepts/top", async (c) => {
   const limit = parseInt(c.req.query("limit") || "20");
   const concepts = await wikiService.topConcepts(workspaceId, limit);
   return c.json({ concepts });
+});
+
+// --- Chat → Wiki-Artikel-Verbund ---
+
+const fromChatSchema = z.object({
+  session_id: z.string().uuid(),
+  instructions: z.string().max(2000).optional(),
+  audience: z.string().max(200).optional(),
+  style: z.string().max(200).optional(),
+  length: z.string().max(50).optional(),
+  max_subpages: z.number().int().min(0).max(12).optional(),
+  max_entities: z.number().int().min(0).max(30).optional(),
+  use_rag: z.boolean().optional(),
+});
+
+// Verbund aus einem Gespräch erzeugen (asynchron). Ersetzt vorhandene, noch
+// nicht veröffentlichte Entwürfe derselben Session ("Regenerieren = ersetzen").
+wikiRouter.post(
+  "/:workspaceId/from-chat",
+  zValidator("json", fromChatSchema),
+  async (c) => {
+    const workspaceId = c.req.param("workspaceId");
+    const user = c.get("user");
+    const data = c.req.valid("json");
+
+    await wikiService.deleteSessionDrafts(workspaceId, data.session_id);
+
+    const clusterId = crypto.randomUUID();
+    // Fire-and-forget; Fortschritt via Activity-Log, Ergebnis via /drafts-Poll.
+    setTimeout(() => {
+      chatWiki
+        .generateClusterFromChat({
+          workspaceId,
+          sessionId: data.session_id,
+          clusterId,
+          spec: {
+            instructions: data.instructions,
+            audience: data.audience,
+            style: data.style,
+            length: data.length,
+            max_subpages: data.max_subpages,
+            max_entities: data.max_entities,
+            use_rag: data.use_rag,
+          },
+          userId: user?.id,
+        })
+        .catch((e: any) =>
+          console.error(`[chat-wiki] Generierung fehlgeschlagen:`, e.message),
+        );
+    }, 50);
+
+    return c.json({ cluster_id: clusterId }, 202);
+  },
+);
+
+// Offene Entwurfs-Verbünde eines Workspace (Hinweis im Wiki-Browser).
+wikiRouter.get("/:workspaceId/draft-clusters", async (c) => {
+  const workspaceId = c.req.param("workspaceId");
+  const clusters = await wikiService.listDraftClusters(workspaceId);
+  return c.json({ clusters });
+});
+
+// Entwurfsseiten eines Verbunds abrufen (Review/Polling) inkl. Generierungs-Status.
+wikiRouter.get("/:workspaceId/clusters/:clusterId/pages", async (c) => {
+  const workspaceId = c.req.param("workspaceId");
+  const clusterId = c.req.param("clusterId");
+  const [pages, status] = await Promise.all([
+    wikiService.listClusterDrafts(workspaceId, clusterId),
+    activityLog.getChatWikiStatus(clusterId),
+  ]);
+  return c.json({ pages, status });
+});
+
+// Verbund veröffentlichen (alle Entwürfe → published).
+wikiRouter.post("/:workspaceId/clusters/:clusterId/publish", async (c) => {
+  const workspaceId = c.req.param("workspaceId");
+  const clusterId = c.req.param("clusterId");
+  const count = await wikiService.publishCluster(workspaceId, clusterId);
+  return c.json({ published: count });
 });
 
 // Einzelne Wiki-Seite abrufen (per Slug)

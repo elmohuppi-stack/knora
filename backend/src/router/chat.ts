@@ -46,6 +46,25 @@ async function getOrCreateSession(
   return newSession;
 }
 
+// Bisherigen Gesprächsverlauf der Session laden (chronologisch, gedeckelt).
+// Wird VOR dem Speichern der aktuellen User-Nachricht aufgerufen, enthält sie
+// also noch nicht.
+async function loadHistory(
+  sessionId: string,
+  limit = 20,
+): Promise<{ role: "user" | "assistant"; content: string }[]> {
+  const rows = await db
+    .select({ role: chatMessages.role, content: chatMessages.content })
+    .from(chatMessages)
+    .where(eq(chatMessages.session_id, sessionId))
+    .orderBy(desc(chatMessages.created_at))
+    .limit(limit);
+  return rows
+    .reverse()
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+}
+
 // Aktiven LLM-Provider laden
 async function getActiveProvider() {
   let providers = await db
@@ -74,13 +93,17 @@ async function getActiveProvider() {
   return providers[0] || null;
 }
 
-// System-Prompt bauen
+// System-Prompt bauen. Weiches Grounding: der Workspace-Kontext wird bevorzugt
+// genutzt, wenn er zur Frage passt – ansonsten antwortet das Modell mit seinem
+// eigenen Wissen, statt zu verweigern. (Frühere strikte Variante blockierte
+// Themen, die nicht in der Wissensdatenbank stehen.)
 function buildSystemPrompt(context: string): string {
   if (!context)
     return "Du bist ein hilfreicher Assistent. Antworte auf Deutsch.";
   return `Du bist ein hilfreicher Assistent mit Zugriff auf eine Wissensdatenbank.
-Antworte auf Deutsch basierend auf dem folgenden Kontext.
-Wenn die Antwort nicht im Kontext enthalten ist, sag dass du es nicht weißt.
+Antworte auf Deutsch. Nutze den folgenden Kontext, wenn er zur Frage passt, und
+weise dann darauf hin. Passt der Kontext nicht oder reicht er nicht aus, nutze
+dein eigenes Wissen und beantworte die Frage trotzdem. Erfinde keine Fakten.
 
 KONTEXT:
 ${context}`;
@@ -97,6 +120,9 @@ chatRouter.post("/", zValidator("json", chatSchema), async (c) => {
     message,
     session_id,
   );
+
+  // Bisherigen Verlauf laden, BEVOR die aktuelle Nachricht gespeichert wird.
+  const history = await loadHistory(session.id);
 
   // User-Nachricht speichern
   await db.insert(chatMessages).values({
@@ -120,7 +146,7 @@ chatRouter.post("/", zValidator("json", chatSchema), async (c) => {
 
   let reply = "";
   if (provider) {
-    reply = await callLLM(provider, message, context);
+    reply = await callLLM(provider, message, context, history);
   } else {
     reply =
       "Kein Chat-Provider konfiguriert. Bitte im Admin einen Provider anlegen.";
@@ -167,6 +193,9 @@ chatRouter.post("/stream", zValidator("json", chatSchema), async (c) => {
     message,
     session_id,
   );
+
+  // Bisherigen Verlauf laden, BEVOR die aktuelle Nachricht gespeichert wird.
+  const history = await loadHistory(session.id);
 
   // User-Nachricht speichern
   const userMsgId = crypto.randomUUID();
@@ -217,9 +246,10 @@ chatRouter.post("/stream", zValidator("json", chatSchema), async (c) => {
       stream: true,
       messages: [
         { role: "system", content: systemPrompt },
+        ...history,
         { role: "user", content: message },
       ],
-      max_tokens: 1024,
+      max_tokens: 4096,
     }),
   });
 
@@ -350,15 +380,38 @@ chatRouter.get("/sessions/:id/messages", async (c) => {
   return c.json({ messages: msgs });
 });
 
+// Session löschen (inkl. Nachrichten). Nur eigene Sessions.
+chatRouter.delete("/sessions/:id", async (c) => {
+  const user = c.get("user");
+  const id = c.req.param("id");
+
+  const [session] = await db
+    .select({ id: chatSessions.id, user_id: chatSessions.user_id })
+    .from(chatSessions)
+    .where(eq(chatSessions.id, id))
+    .limit(1);
+
+  if (!session) return c.json({ error: "Session not found" }, 404);
+  if (session.user_id !== user.id) return c.json({ error: "Forbidden" }, 403);
+
+  // Erst Nachrichten (FK), dann Session.
+  await db.delete(chatMessages).where(eq(chatMessages.session_id, id));
+  await db.delete(chatSessions).where(eq(chatSessions.id, id));
+
+  return c.json({ deleted: true });
+});
+
 async function callLLM(
   provider: typeof modelProviders.$inferSelect,
   message: string,
   context: string,
+  history: { role: "user" | "assistant"; content: string }[] = [],
 ): Promise<string> {
   const systemPrompt = context
-    ? `Du bist ein hilfreicher Assistent mit Zugriff auf eine Wissensdatenbank. 
-Antworte auf Deutsch basierend auf dem folgenden Kontext. 
-Wenn die Antwort nicht im Kontext enthalten ist, sag dass du es nicht weißt.
+    ? `Du bist ein hilfreicher Assistent mit Zugriff auf eine Wissensdatenbank.
+Antworte auf Deutsch. Nutze den folgenden Kontext, wenn er zur Frage passt, und
+weise dann darauf hin. Passt der Kontext nicht oder reicht er nicht aus, nutze
+dein eigenes Wissen und beantworte die Frage trotzdem. Erfinde keine Fakten.
 
 KONTEXT:
 ${context}`
@@ -375,11 +428,12 @@ ${context}`
         model: provider.default_model,
         messages: [
           { role: "system", content: systemPrompt },
+          ...history,
           { role: "user", content: message },
         ],
-        max_tokens: 1024,
+        max_tokens: 4096,
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(120000),
     });
 
     if (!response.ok) {

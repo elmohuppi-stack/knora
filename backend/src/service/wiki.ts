@@ -10,6 +10,7 @@ import {
 } from "../db/schema.ts";
 import {
   eq,
+  ne,
   and,
   like,
   or,
@@ -99,6 +100,7 @@ export async function listPages(
   workspaceId: string,
   options?: {
     page_type?: string;
+    status?: string;
     query?: string;
     source_document_id?: string;
     // Herkunfts-Filter/Sortierung über das Quell-Dokument (Ebene 2).
@@ -121,6 +123,11 @@ export async function listPages(
 
   if (options?.page_type) {
     conditions = and(conditions, eq(wikiPages.page_type, options.page_type))!;
+  }
+  // Status-Filter: der normale Wiki-Browser übergibt "published" und blendet so
+  // unveröffentlichte Entwürfe (Chat-Verbund) aus.
+  if (options?.status) {
+    conditions = and(conditions, eq(wikiPages.status, options.status))!;
   }
   if (options?.query) {
     conditions = and(
@@ -229,6 +236,8 @@ export async function topConcepts(workspaceId: string, limit = 20) {
       and(
         eq(wikiPages.workspace_id, workspaceId),
         eq(wikiPages.page_type, "concept"),
+        // Entwürfe (z.B. Chat-Verbund vor Veröffentlichung) ausblenden.
+        ne(wikiPages.status, "draft"),
       ),
     )
     .orderBy(desc(sql`jsonb_array_length(${wikiPages.in_links})`))
@@ -296,6 +305,7 @@ export async function getGraph(
             and(
               eq(wikiPages.workspace_id, workspaceId),
               inArray(wikiPages.slug, allSlugs),
+              ne(wikiPages.status, "draft"),
             ),
           )
       : [];
@@ -345,8 +355,10 @@ export async function createPage(data: {
   content?: string;
   summary?: string;
   page_type?: string;
+  status?: string;
   source_document_id?: string;
   created_by?: number;
+  page_metadata?: Record<string, unknown>;
 }) {
   const id = crypto.randomUUID();
   const [page] = await db
@@ -359,8 +371,10 @@ export async function createPage(data: {
       content: data.content || "",
       summary: data.summary || "",
       page_type: data.page_type || "article",
+      status: data.status || "published",
       source_document_id: data.source_document_id || null,
       created_by: data.created_by || null,
+      page_metadata: data.page_metadata || {},
     })
     .returning();
 
@@ -514,6 +528,105 @@ export async function deletePage(workspaceId: string, slug: string) {
   }
 }
 
+// --- Chat-Verbund (Draft-Cluster) ---
+
+/** Alle Seiten eines Chat-Verbunds (Cluster), Hauptseite zuerst. */
+export async function listClusterDrafts(workspaceId: string, clusterId: string) {
+  const rows = await db
+    .select(getTableColumns(wikiPages))
+    .from(wikiPages)
+    .where(
+      and(
+        eq(wikiPages.workspace_id, workspaceId),
+        sql`${wikiPages.page_metadata}->>'cluster_id' = ${clusterId}`,
+      ),
+    )
+    .orderBy(desc(sql`${wikiPages.page_metadata}->>'is_main'`), asc(wikiPages.title));
+  return rows;
+}
+
+/** Offene Entwurfs-Verbünde eines Workspace (gruppiert nach cluster_id) –
+ * damit der Wiki-Browser auf noch nicht veröffentlichte Chat-Verbünde hinweisen
+ * und zurück ins Review verlinken kann. */
+export async function listDraftClusters(workspaceId: string) {
+  const rows = await db
+    .select({
+      title: wikiPages.title,
+      created_at: wikiPages.created_at,
+      page_metadata: wikiPages.page_metadata,
+    })
+    .from(wikiPages)
+    .where(
+      and(
+        eq(wikiPages.workspace_id, workspaceId),
+        eq(wikiPages.status, "draft"),
+      ),
+    );
+
+  const map = new Map<
+    string,
+    { cluster_id: string; title: string; count: number; created_at: Date }
+  >();
+  for (const r of rows) {
+    const meta = (r.page_metadata as any) || {};
+    const cid = meta.cluster_id;
+    if (!cid) continue;
+    let entry = map.get(cid);
+    if (!entry) {
+      entry = { cluster_id: cid, title: r.title, count: 0, created_at: r.created_at };
+      map.set(cid, entry);
+    }
+    entry.count++;
+    if (meta.is_main) entry.title = r.title;
+    if (r.created_at < entry.created_at) entry.created_at = r.created_at;
+  }
+  return Array.from(map.values()).sort(
+    (a, b) => b.created_at.getTime() - a.created_at.getTime(),
+  );
+}
+
+/** Alle (noch nicht veröffentlichten, nicht handeditierten) Draft-Seiten einer
+ * Chat-Session löschen – für "Regenerieren = ersetzen". */
+export async function deleteSessionDrafts(
+  workspaceId: string,
+  sessionId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ slug: wikiPages.slug })
+    .from(wikiPages)
+    .where(
+      and(
+        eq(wikiPages.workspace_id, workspaceId),
+        eq(wikiPages.status, "draft"),
+        eq(wikiPages.manually_edited, false),
+        sql`${wikiPages.page_metadata}->>'chat_session_id' = ${sessionId}`,
+      ),
+    );
+  for (const r of rows) {
+    await deletePage(workspaceId, r.slug);
+  }
+  return rows.length;
+}
+
+/** Einen Chat-Verbund veröffentlichen: alle Draft-Seiten auf published setzen. */
+export async function publishCluster(
+  workspaceId: string,
+  clusterId: string,
+): Promise<number> {
+  const res = await db
+    .update(wikiPages)
+    .set({ status: "published", updated_at: new Date() })
+    .where(
+      and(
+        eq(wikiPages.workspace_id, workspaceId),
+        eq(wikiPages.status, "draft"),
+        sql`${wikiPages.page_metadata}->>'cluster_id' = ${clusterId}`,
+      ),
+    )
+    .returning({ slug: wikiPages.slug });
+  return res.length;
+}
+
 // --- Wiki-Link Resolution ---
 
 export async function resolveLinks(
@@ -580,21 +693,28 @@ export async function updateIncomingLinks(
 // --- Wiki Stats ---
 
 export async function getStats(workspaceId: string) {
+  // Entwürfe (unveröffentlichte Chat-Verbünde) zählen nicht mit – sonst weicht
+  // die Statistik von der (published-gefilterten) Wiki-Liste ab.
+  const published = and(
+    eq(wikiPages.workspace_id, workspaceId),
+    ne(wikiPages.status, "draft"),
+  );
+
   const [countResult] = await db
     .select({ count: sql<number>`count(*)` })
     .from(wikiPages)
-    .where(eq(wikiPages.workspace_id, workspaceId));
+    .where(published);
 
   const typeResult = await db
     .select({ type: wikiPages.page_type, count: sql<number>`count(*)` })
     .from(wikiPages)
-    .where(eq(wikiPages.workspace_id, workspaceId))
+    .where(published)
     .groupBy(wikiPages.page_type);
 
   const recent = await db
     .select()
     .from(wikiPages)
-    .where(eq(wikiPages.workspace_id, workspaceId))
+    .where(published)
     .orderBy(desc(wikiPages.updated_at))
     .limit(5);
 

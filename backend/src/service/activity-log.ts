@@ -71,6 +71,27 @@ export async function updateLog(
 }
 
 /**
+ * Status der (jüngsten) Chat-Verbund-Generierung eines Clusters.
+ * Liefert "started" | "completed" | "failed" oder null (kein Log gefunden).
+ */
+export async function getChatWikiStatus(
+  clusterId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ status: activityLogs.status })
+    .from(activityLogs)
+    .where(
+      and(
+        eq(activityLogs.action, "chat_wiki"),
+        sql`${activityLogs.details}->>'cluster_id' = ${clusterId}`,
+      ),
+    )
+    .orderBy(desc(activityLogs.created_at))
+    .limit(1);
+  return row?.status || null;
+}
+
+/**
  * Aktivitätslogs abrufen (paginiert, gefiltert).
  */
 export async function getLogs(options: {

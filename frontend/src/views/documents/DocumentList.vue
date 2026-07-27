@@ -436,7 +436,7 @@ const urlInput = ref("");
 const youtubeUrl = ref("");
 
 // Filter & Sortierung (Ebene 2)
-const TYPES = ["youtube", "url", "pdf", "docx", "html", "md", "txt"];
+const TYPES = ["youtube", "url", "pdf", "docx", "html", "md", "txt", "chat"];
 const filterQuery = ref("");
 const filterType = ref("");
 const filterChannel = ref("");

@@ -134,7 +134,8 @@ const renderedContent = computed(() => {
   let html = page.value.content.replace(
     /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
     (_: string, slug: string, text?: string) => {
-      const label = text || slug.split("/").pop() || slug;
+      const raw = slug.split("/").pop() || slug;
+      const label = text || raw.replace(/-/g, " ").replace(/^./, (ch) => ch.toUpperCase());
       return `<a href="/workspaces/${workspaceId.value}/wiki/${encodeURIComponent(slug)}" class="wiki-link">${label}</a>`;
     },
   );

@@ -47,6 +47,12 @@ const router = createRouter({
           component: () => import("../views/wiki/WikiBrowser.vue"),
         },
         {
+          // Review eines aus dem Chat erzeugten Artikel-Verbunds (Entwürfe).
+          path: "wiki-review/:clusterId",
+          name: "WorkspaceWikiReview",
+          component: () => import("../views/wiki/WikiClusterReview.vue"),
+        },
+        {
           path: "wiki/:slug(.*)",
           name: "WorkspaceWikiPage",
           component: () => import("../views/wiki/WikiBrowser.vue"),

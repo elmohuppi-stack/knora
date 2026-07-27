@@ -21,15 +21,26 @@
           <div v-if="group.sessions.length" class="session-group-label">
             {{ group.label }}
           </div>
-          <button
+          <div
             v-for="s in group.sessions"
             :key="s.id"
-            :class="['session-item', { active: s.id === sessionId }]"
-            @click="openSession(s)"
-            :title="s.title || 'Unterhaltung'"
+            :class="['session-row', { active: s.id === sessionId }]"
           >
-            {{ s.title || "Unterhaltung" }}
-          </button>
+            <button
+              class="session-item"
+              @click="openSession(s)"
+              :title="s.title || 'Unterhaltung'"
+            >
+              {{ s.title || "Unterhaltung" }}
+            </button>
+            <button
+              class="session-delete"
+              @click.stop="deleteSession(s)"
+              title="Unterhaltung löschen"
+            >
+              <i class="pi pi-trash"></i>
+            </button>
+          </div>
         </template>
       </div>
     </aside>
@@ -45,6 +56,19 @@
           <i class="pi pi-bars"></i>
         </button>
         <h3>Chat</h3>
+        <button
+          class="article-btn"
+          :disabled="!canGenerateArticle"
+          :title="
+            canGenerateArticle
+              ? 'Artikel-Verbund aus diesem Gespräch erzeugen'
+              : 'Wähle einen Workspace und führe zuerst ein Gespräch'
+          "
+          @click="openArticleDialog"
+        >
+          <i class="pi pi-book"></i>
+          <span>Artikel-Verbund</span>
+        </button>
       </div>
 
       <div class="messages" ref="messagesRef">
@@ -56,18 +80,29 @@
           :key="msg.id"
           :class="['message', msg.role]"
         >
-          <div class="avatar">{{ msg.role === "user" ? "👤" : "🤖" }}</div>
+          <div class="avatar">
+            <i
+              v-if="msg.id === streamingId"
+              class="pi pi-spin pi-spinner avatar-spin"
+            ></i>
+            <template v-else>{{ msg.role === "user" ? "👤" : "🤖" }}</template>
+          </div>
           <div class="bubble">
-            <div v-html="renderMarkdown(msg.content)"></div>
+            <!-- Phase 1: noch kein Text – „denkt nach" mit pulsierenden Punkten -->
+            <div v-if="msg.id === streamingId && !msg.content" class="thinking">
+              <span class="dots"><span></span><span></span><span></span></span>
+              <span class="thinking-label">KI denkt nach …</span>
+            </div>
+            <!-- Phase 2: Text streamt (mit „schreibt …"-Hinweis) -->
+            <template v-else>
+              <div v-html="renderMarkdown(msg.content)"></div>
+              <div v-if="msg.id === streamingId" class="writing-hint">
+                <span class="pulse-dot"></span> KI schreibt …
+              </div>
+            </template>
             <div v-if="msg.knowledge_refs?.length" class="refs">
               <small>Quellen: {{ msg.knowledge_refs.length }} Chunks</small>
             </div>
-          </div>
-        </div>
-        <div v-if="isStreaming" class="message assistant">
-          <div class="avatar">🤖</div>
-          <div class="bubble streaming">
-            <span class="cursor-blink">▊</span>
           </div>
         </div>
       </div>
@@ -79,13 +114,16 @@
             {{ ws.name }}
           </option>
         </select>
-        <input
+        <textarea
+          ref="inputRef"
           v-model="input"
-          @keydown.enter="sendMessage"
-          placeholder="Nachricht eingeben..."
+          @keydown.enter.exact.prevent="sendMessage"
+          @input="autoGrow"
+          rows="1"
+          placeholder="Nachricht eingeben... (Enter = senden, Shift+Enter = neue Zeile)"
           class="msg-input"
           :disabled="isStreaming"
-        />
+        ></textarea>
         <button
           @click="sendMessage"
           :disabled="!input.trim() || isStreaming"
@@ -95,6 +133,67 @@
         </button>
       </div>
     </section>
+
+    <!-- Dialog: Artikel-Verbund aus dem Gespräch -->
+    <div v-if="articleDialog" class="modal-overlay" @click.self="articleDialog = false">
+      <div class="modal">
+        <h3>Artikel-Verbund erzeugen</h3>
+        <p class="modal-sub">
+          Aus dem aktuellen Gespräch wird ein Hauptartikel mit verlinkten
+          Unterartikeln (Entwurf) erstellt.
+        </p>
+
+        <label class="fld">
+          <span>Zielgruppe</span>
+          <input v-model="spec.audience" placeholder="z.B. Schüler der Mittelstufe" />
+        </label>
+        <label class="fld">
+          <span>Stil / Sprache</span>
+          <input v-model="spec.style" placeholder="z.B. einfache, anschauliche Sprache" />
+        </label>
+        <label class="fld">
+          <span>Max. Themen-Artikel (Concepts)</span>
+          <input type="number" min="0" max="12" v-model.number="spec.max_subpages" />
+        </label>
+        <label class="fld">
+          <span>Max. Begriffs-Artikel (Entities: Personen, Orte, Begriffe)</span>
+          <input type="number" min="0" max="30" v-model.number="spec.max_entities" />
+        </label>
+        <label class="fld">
+          <span>Zusätzliche Anweisungen (optional)</span>
+          <textarea
+            v-model="spec.instructions"
+            rows="3"
+            placeholder="z.B. Fokus auf wirtschaftliche Folgen und die Rolle einzelner Personen"
+          ></textarea>
+        </label>
+        <label class="fld-check">
+          <input type="checkbox" v-model="spec.use_rag" />
+          <span>Workspace-Dokumente als Kontext nutzen (RAG)</span>
+        </label>
+        <p class="fld-hint">
+          Wenn aktiv, werden vorhandene Dokumente dieses Workspace durchsucht und
+          passende Stellen als Quelle einbezogen. Bei leerem Workspace ohne
+          Wirkung – dann aus lassen.
+        </p>
+
+        <div class="modal-actions">
+          <button class="btn-secondary" @click="articleDialog = false">
+            Abbrechen
+          </button>
+          <button class="btn-primary" :disabled="generating" @click="generateArticleCluster">
+            {{ generating ? "Starte …" : "Erzeugen" }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <ConfirmModal
+      :show="showConfirm"
+      :options="confirmOptions"
+      :on-confirm="onConfirm"
+      :on-cancel="onCancel"
+    />
   </main>
 </template>
 
@@ -102,14 +201,38 @@
 import { ref, computed, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
+import { useConfirm } from "../../composables/useConfirm";
+import ConfirmModal from "../../components/ConfirmModal.vue";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import axios from "axios";
 
 const auth = useAuthStore();
 const router = useRouter();
+const {
+  show: showConfirm,
+  options: confirmOptions,
+  ask: askConfirm,
+  onConfirm,
+  onCancel,
+} = useConfirm();
 const messages = ref<any[]>([]);
 const input = ref("");
+const inputRef = ref<HTMLTextAreaElement>();
+// ID der Assistant-Nachricht, die gerade gestreamt wird (für Typing-Indikator).
+const streamingId = ref<string | null>(null);
+
+// Textarea an den Inhalt anpassen (mitwachsend bis zu einer Maximalhöhe).
+function autoGrow() {
+  const el = inputRef.value;
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, 200) + "px";
+}
+function resetInputHeight() {
+  const el = inputRef.value;
+  if (el) el.style.height = "auto";
+}
 const workspaceId = ref("");
 const workspaces = ref<any[]>([]);
 const isStreaming = ref(false);
@@ -194,6 +317,27 @@ async function openSession(s: any) {
   } catch {}
 }
 
+async function deleteSession(s: any) {
+  const ok = await askConfirm({
+    title: "Unterhaltung löschen?",
+    message: `„${s.title || "Unterhaltung"}" wird endgültig gelöscht. Das kann nicht rückgängig gemacht werden.`,
+    confirmText: "Löschen",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await axios.delete(`/api/v1/chat/sessions/${s.id}`);
+    sessions.value = sessions.value.filter((x: any) => x.id !== s.id);
+    // War es die gerade offene Unterhaltung? Dann Ansicht leeren.
+    if (sessionId.value === s.id) {
+      sessionId.value = null;
+      messages.value = [];
+    }
+  } catch (e: any) {
+    alert("Löschen fehlgeschlagen: " + (e?.message || e));
+  }
+}
+
 function renderMarkdown(text: string) {
   const html = marked.parse(text, { async: false }) as string;
   return DOMPurify.sanitize(html);
@@ -220,6 +364,7 @@ async function sendMessage() {
   messages.value.push(userMsg);
   const query = input.value;
   input.value = "";
+  resetInputHeight();
   isStreaming.value = true;
 
   // Streaming-Assistant-Nachricht vorbereiten
@@ -230,6 +375,7 @@ async function sendMessage() {
     knowledge_refs: [],
   };
   messages.value.push(assistantMsg);
+  streamingId.value = assistantMsg.id;
 
   try {
     const res = await fetch("/api/v1/chat/stream", {
@@ -275,9 +421,62 @@ async function sendMessage() {
     assistantMsg.content = "❌ Fehler bei der Anfrage: " + e.message;
   } finally {
     isStreaming.value = false;
+    streamingId.value = null;
     scrollToBottom();
     // Sidebar aktualisieren: neue Session einfügen bzw. Reihenfolge auffrischen
     loadSessions();
+  }
+}
+
+// --- Artikel-Verbund aus dem Gespräch ---
+const articleDialog = ref(false);
+const generating = ref(false);
+const spec = ref<{
+  audience: string;
+  style: string;
+  max_subpages: number;
+  max_entities: number;
+  instructions: string;
+  use_rag: boolean;
+}>({
+  audience: "Interessierter Laie (kein Experte)",
+  style: "anschauliche, verständliche Sprache in Prosa, keine Stichpunkte",
+  max_subpages: 5,
+  max_entities: 12,
+  instructions: "",
+  use_rag: false,
+});
+
+// Nur möglich, wenn ein Workspace gewählt ist und ein Gespräch existiert.
+const canGenerateArticle = computed(
+  () => !!workspaceId.value && !!sessionId.value && messages.value.length > 0,
+);
+
+function openArticleDialog() {
+  if (!canGenerateArticle.value) return;
+  articleDialog.value = true;
+}
+
+async function generateArticleCluster() {
+  if (!canGenerateArticle.value || generating.value) return;
+  generating.value = true;
+  try {
+    const res = await axios.post(`/api/v1/wiki/${workspaceId.value}/from-chat`, {
+      session_id: sessionId.value,
+      audience: spec.value.audience || undefined,
+      style: spec.value.style || undefined,
+      max_subpages: spec.value.max_subpages,
+      max_entities: spec.value.max_entities,
+      instructions: spec.value.instructions || undefined,
+      use_rag: spec.value.use_rag,
+    });
+    const clusterId = res.data.cluster_id;
+    articleDialog.value = false;
+    router.push(`/workspaces/${workspaceId.value}/wiki-review/${clusterId}`);
+  } catch (e: any) {
+    alert("Fehler beim Starten der Generierung: " + (e?.message || e));
+  } finally {
+    generating.value = false;
   }
 }
 </script>
@@ -339,12 +538,26 @@ async function sendMessage() {
   color: var(--color-text-secondary);
 }
 
+.session-row {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+  margin-bottom: 0.1rem;
+}
+.session-row:hover {
+  background: var(--color-border);
+}
+.session-row.active {
+  background: var(--color-primary);
+}
+.session-row.active .session-item {
+  color: #fff;
+}
 .session-item {
-  display: block;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   padding: 0.5rem;
-  margin-bottom: 0.1rem;
   background: none;
   border: none;
   border-radius: 6px;
@@ -355,11 +568,27 @@ async function sendMessage() {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.session-item:hover {
-  background: var(--color-border);
+.session-delete {
+  flex-shrink: 0;
+  visibility: hidden;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  color: var(--color-text);
+  opacity: 0.7;
+  font-size: 0.85rem;
 }
-.session-item.active {
-  background: var(--color-primary);
+.session-row:hover .session-delete {
+  visibility: visible;
+}
+.session-delete:hover {
+  opacity: 1;
+  color: #ef4444;
+}
+.session-row.active .session-delete {
+  visibility: visible;
   color: #fff;
 }
 
@@ -376,6 +605,122 @@ async function sendMessage() {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+/* Artikel-Verbund-Button (rechts im Header) */
+.article-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--color-primary);
+  background: none;
+  color: var(--color-primary);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+.article-btn:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: #fff;
+}
+.article-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Modal: Artikel-Verbund-Spec */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+.modal {
+  background: var(--color-bg, #fff);
+  color: var(--color-text, #111);
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 620px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+.modal h3 {
+  margin: 0 0 0.25rem;
+}
+.modal-sub {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--color-text-muted, #6b7280);
+}
+.fld {
+  display: block;
+  margin-bottom: 0.85rem;
+}
+.fld > span {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+.fld input,
+.fld textarea {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 6px;
+  font: inherit;
+  background: var(--color-bg-secondary, #f9fafb);
+  color: inherit;
+  box-sizing: border-box;
+}
+.fld-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+  margin-bottom: 0.35rem;
+}
+.fld-hint {
+  margin: 0 0 1rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--color-text-muted, #6b7280);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.modal-actions .btn-primary,
+.modal-actions .btn-secondary {
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  border: 1px solid var(--color-border, #d1d5db);
+}
+.modal-actions .btn-primary {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: transparent;
+}
+.modal-actions .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.modal-actions .btn-secondary {
+  background: var(--color-bg-secondary, #f3f4f6);
+  color: var(--color-text, #111);
 }
 
 /* Verlauf-Toggle + Backdrop: nur auf dem Handy sichtbar */
@@ -438,13 +783,78 @@ async function sendMessage() {
   opacity: 0.6;
 }
 
-.streaming .cursor-blink {
-  animation: blink 1s steps(1) infinite;
+/* Spinner im Avatar während des Streamens */
+.avatar-spin {
+  font-size: 1.1rem;
+  color: var(--color-primary);
 }
 
-@keyframes blink {
+/* Phase 1: „KI denkt nach …" mit pulsierenden Punkten */
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.thinking-label {
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.9rem;
+}
+.dots {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+.dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  opacity: 0.4;
+  animation: dot-bounce 1.2s infinite ease-in-out both;
+}
+.dots span:nth-child(1) {
+  animation-delay: -0.24s;
+}
+.dots span:nth-child(2) {
+  animation-delay: -0.12s;
+}
+@keyframes dot-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+/* Phase 2: Text streamt – dezenter „schreibt …"-Hinweis */
+.writing-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  animation: pulse 1s infinite ease-in-out;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(0.7);
+    opacity: 0.5;
+  }
   50% {
-    opacity: 0;
+    transform: scale(1);
+    opacity: 1;
   }
 }
 
@@ -453,7 +863,7 @@ async function sendMessage() {
   gap: 0.5rem;
   padding: 1rem 1.5rem;
   border-top: 1px solid var(--color-border);
-  align-items: center;
+  align-items: flex-end;
 }
 
 .ws-select {
@@ -469,6 +879,13 @@ async function sendMessage() {
   border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: 1rem;
+  font-family: inherit;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto;
+  max-height: 200px;
+  min-height: 2.6rem;
+  box-sizing: border-box;
 }
 
 .msg-input:focus {
