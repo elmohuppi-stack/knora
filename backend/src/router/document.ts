@@ -2,7 +2,12 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { authMiddleware } from "../middleware/auth.ts";
+import {
+  assertWorkspaceAccess,
+  assertDocumentAccess,
+} from "../middleware/workspace-access.ts";
 import * as documentService from "../service/document.ts";
+import * as documentMove from "../service/document-move.ts";
 import {
   extractVideoId,
   fetchYouTubeInfo,
@@ -25,6 +30,7 @@ const urlSchema = z.object({
 // Distinct-Kanäle eines Workspace (für das Kanal-Filter-Dropdown)
 documentRouter.get("/:workspaceId/channels", async (c) => {
   const workspaceId = c.req.param("workspaceId");
+  await assertWorkspaceAccess(c.get("user"), workspaceId, "read");
   const channels = await documentService.listChannels(workspaceId);
   return c.json({ channels });
 });
@@ -32,6 +38,7 @@ documentRouter.get("/:workspaceId/channels", async (c) => {
 // Dokumente eines Workspace auflisten (mit Filter/Sortierung, Ebene 2)
 documentRouter.get("/:workspaceId", async (c) => {
   const workspaceId = c.req.param("workspaceId");
+  await assertWorkspaceAccess(c.get("user"), workspaceId, "read");
   const q = c.req.query();
   const parseDate = (v?: string) => {
     if (!v) return undefined;
@@ -62,6 +69,7 @@ documentRouter.get("/:workspaceId", async (c) => {
 
 // Themen eines Dokuments abrufen (topic_ids)
 documentRouter.get("/:id/topics", async (c) => {
+  await assertDocumentAccess(c.get("user"), c.req.param("id"), "read");
   const ids = await topicService.getDocumentTopicIds(c.req.param("id"));
   return c.json({ topic_ids: ids });
 });
@@ -72,6 +80,7 @@ documentRouter.patch(
   "/:id/topics",
   zValidator("json", docTopicsSchema),
   async (c) => {
+    await assertDocumentAccess(c.get("user"), c.req.param("id"), "write");
     const { topic_ids } = c.req.valid("json");
     await topicService.setDocumentTopics(c.req.param("id"), topic_ids);
     return c.json({ topic_ids });
@@ -81,6 +90,7 @@ documentRouter.patch(
 // Einzelnes Dokument abrufen
 documentRouter.get("/detail/:id", async (c) => {
   const id = c.req.param("id");
+  await assertDocumentAccess(c.get("user"), id, "read");
   const doc = await documentService.getDocument(id);
   if (!doc) return c.json({ error: "Document not found" }, 404);
   return c.json({ document: doc });
@@ -90,6 +100,7 @@ documentRouter.get("/detail/:id", async (c) => {
 documentRouter.post("/upload/:workspaceId", async (c) => {
   const workspaceId = c.req.param("workspaceId");
   const user = c.get("user");
+  await assertWorkspaceAccess(user, workspaceId, "write");
 
   const body = await c.req.parseBody();
   const file = body["file"] as File | undefined;
@@ -240,6 +251,7 @@ async function processUploadedFile(
 documentRouter.post("/import-url", zValidator("json", urlSchema), async (c) => {
   const user = c.get("user");
   const { workspace_id, url, title } = c.req.valid("json");
+  await assertWorkspaceAccess(user, workspace_id, "write");
 
   const doc = await documentService.createDocument({
     id: crypto.randomUUID(),
@@ -273,6 +285,7 @@ documentRouter.post(
   async (c) => {
     const user = c.get("user");
     const { workspace_id, url } = c.req.valid("json");
+    await assertWorkspaceAccess(user, workspace_id, "write");
 
     const t0 = Date.now();
     console.log(`[doc] ========== YouTube-Import gestartet ==========`);
@@ -374,6 +387,7 @@ documentRouter.post(
 // oder um veraltete Metadaten zu aktualisieren. Content/Transkript bleibt.
 documentRouter.post("/:id/refresh-metadata", async (c) => {
   const id = c.req.param("id");
+  await assertDocumentAccess(c.get("user"), id, "write");
   const doc = await documentService.getDocument(id);
   if (!doc) return c.json({ error: "Document not found" }, 404);
   if (doc.type !== "youtube") {
@@ -403,9 +417,48 @@ documentRouter.post("/:id/refresh-metadata", async (c) => {
   return c.json({ document: updated });
 });
 
+// Vorschau: was würde ein Verschieben bewirken? Verlangt Schreibrecht in Quelle
+// UND Ziel – verschieben heißt in beiden Workspaces ändern.
+documentRouter.get("/:id/move-preview", async (c) => {
+  const user = c.get("user");
+  const id = c.req.param("id");
+  const target = c.req.query("target");
+  if (!target) return c.json({ error: "target is required" }, 400);
+
+  await assertDocumentAccess(user, id, "write");
+  await assertWorkspaceAccess(user, target, "write");
+
+  const preview = await documentMove.previewMove(id, target);
+  if ("error" in preview) return c.json(preview, 400);
+  return c.json({ preview });
+});
+
+// Dokument samt zugehöriger Wiki-Artikel in einen anderen Workspace verschieben
+documentRouter.post(
+  "/:id/move",
+  zValidator("json", z.object({ target_workspace_id: z.string().uuid() })),
+  async (c) => {
+    const user = c.get("user");
+    const id = c.req.param("id");
+    const { target_workspace_id } = c.req.valid("json");
+
+    await assertDocumentAccess(user, id, "write");
+    await assertWorkspaceAccess(user, target_workspace_id, "write");
+
+    try {
+      const result = await documentMove.moveDocument(id, target_workspace_id);
+      return c.json(result);
+    } catch (e: any) {
+      console.error("[doc] Verschieben fehlgeschlagen:", e);
+      return c.json({ error: e.message }, 400);
+    }
+  },
+);
+
 // Dokument löschen
 documentRouter.delete("/:id", async (c) => {
   const id = c.req.param("id");
+  await assertDocumentAccess(c.get("user"), id, "write");
   await documentService.deleteDocument(id);
   return c.json({ success: true });
 });

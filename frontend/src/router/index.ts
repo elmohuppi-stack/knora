@@ -97,7 +97,7 @@ const router = createRouter({
       path: "/settings",
       name: "Settings",
       component: () => import("../views/admin/AdminPanel.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresAdmin: true },
     },
   ],
 });
@@ -133,9 +133,19 @@ router.beforeEach((to, from, next) => {
   const token = localStorage.getItem("token");
   if (to.meta.requiresAuth && !token) {
     next({ name: "Login" });
-  } else {
-    next();
+    return;
   }
+  // Rollen-Check nur als UI-Führung – durchgesetzt wird er im Backend
+  // (requireRole in admin/model-Router).
+  if (to.meta.requiresAdmin) {
+    const raw = localStorage.getItem("user");
+    const role = raw ? JSON.parse(raw)?.role : null;
+    if (role !== "admin") {
+      next({ path: "/chat" });
+      return;
+    }
+  }
+  next();
 });
 
 export default router;

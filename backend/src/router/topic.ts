@@ -2,10 +2,14 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { authMiddleware } from "../middleware/auth.ts";
+import { workspaceParamAccess } from "../middleware/workspace-access.ts";
 import * as topicService from "../service/topic.ts";
 
 const topicRouter = new Hono();
 topicRouter.use("*", authMiddleware);
+// Alle Themen-Routen sind workspace-gebunden – GET = lesen, sonst schreiben.
+topicRouter.use("/:workspaceId", workspaceParamAccess());
+topicRouter.use("/:workspaceId/*", workspaceParamAccess());
 
 const createSchema = z.object({
   label: z.string().min(1).max(255),

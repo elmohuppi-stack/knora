@@ -933,7 +933,7 @@ function injectCrossLinks(
  * Entfernt [[slug|name]]- und [[slug]]-Links, deren Ziel-Seite nicht existiert,
  * und ersetzt sie durch den reinen Anzeigetext.
  */
-function stripDeadLinks(content: string, validSlugs: Set<string>): string {
+export function stripDeadLinks(content: string, validSlugs: Set<string>): string {
   return content.replace(
     /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
     (match, slug: string, text?: string) => {

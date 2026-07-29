@@ -201,6 +201,13 @@
               >
                 {{ refreshingId === doc.id ? "⏳" : "🔄" }}
               </button>
+              <button
+                class="btn-icon-sm"
+                @click.stop="openMove(doc)"
+                title="In anderen Workspace verschieben"
+              >
+                📦
+              </button>
               <button class="btn-danger-sm" @click.stop="deleteDoc(doc.id)">
                 ✕
               </button>
@@ -282,6 +289,65 @@
             <strong>Erstellt am</strong>
             <span>{{ formatDate(ws.created_at) }}</span>
           </div>
+        </div>
+
+        <!-- Zugriff: Besitzer + Mitglieder -->
+        <div class="field">
+          <label>Besitzer</label>
+          <select
+            v-if="auth.isAdmin"
+            v-model="editOwnerId"
+            class="access-select"
+          >
+            <option v-for="u in allUsers" :key="u.id" :value="u.id">
+              {{ u.name }} ({{ u.email }})
+            </option>
+          </select>
+          <p v-else class="field-static">{{ ownerLabel }}</p>
+          <p v-if="auth.isAdmin" class="field-hint">
+            Beim Wechsel bleibt der bisherige Besitzer als Bearbeiter im
+            Workspace.
+          </p>
+        </div>
+
+        <div v-if="canManageMembers" class="field">
+          <label>Mitglieder</label>
+          <div class="topic-manage-toolbar">
+            <select v-model="newMemberId" class="access-select">
+              <option value="">Benutzer wählen…</option>
+              <option v-for="u in invitableUsers" :key="u.id" :value="u.id">
+                {{ u.name }} ({{ u.email }})
+              </option>
+            </select>
+            <select v-model="newMemberRole" class="access-select role-select">
+              <option value="editor">Bearbeiter</option>
+              <option value="viewer">Leser</option>
+            </select>
+            <button
+              class="btn-secondary"
+              :disabled="!newMemberId"
+              @click="addMember"
+            >
+              + Einladen
+            </button>
+          </div>
+
+          <div v-if="members.length" class="topic-manage-list">
+            <div v-for="m in members" :key="m.user_id" class="topic-manage-item">
+              <span class="topic-manage-label">{{ m.name }}</span>
+              <span class="topic-manage-count">{{ roleLabel(m.role) }}</span>
+              <button
+                v-if="m.user_id !== ws.created_by"
+                class="topic-manage-del"
+                @click="removeMember(m.user_id)"
+                title="Mitglied entfernen"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          <p v-else class="topic-empty">Noch keine weiteren Mitglieder.</p>
+          <p v-if="memberError" class="error">{{ memberError }}</p>
         </div>
 
         <!-- Themen-Verwaltung (Ebene 1) -->
@@ -385,6 +451,82 @@
         <p v-if="settingsError" class="error">{{ settingsError }}</p>
       </div>
     </div>
+    <!-- Dokument verschieben -->
+    <div
+      v-if="showMove && moveDoc"
+      class="dialog-overlay"
+      @click.self="closeMove"
+    >
+      <div class="dialog">
+        <h3>📦 Dokument verschieben</h3>
+        <p class="move-doc-title">{{ moveDoc.title }}</p>
+
+        <div class="field">
+          <label>Ziel-Workspace</label>
+          <WorkspaceSelect
+            v-model="moveTarget"
+            writable-only
+            :exclude="workspaceId"
+            placeholder="Ziel wählen…"
+            empty-label="Kein anderer Workspace mit Schreibrecht"
+          />
+        </div>
+
+        <p v-if="movePreviewLoading" class="move-hint">Prüfe…</p>
+        <p v-else-if="moveError" class="error">{{ moveError }}</p>
+
+        <div v-else-if="movePreview" class="move-preview">
+          <ul class="move-list">
+            <li>
+              <strong>{{ movePreview.moving_pages.length }}</strong> Wiki-Artikel
+              wandern mit
+            </li>
+            <li>
+              <strong>{{
+                movePreview.chunk_count + movePreview.wiki_chunk_count
+              }}</strong>
+              Chunks (Dokument + Wiki) werden umgehängt
+            </li>
+            <li v-if="movePreview.staying_pages.length">
+              <strong>{{ movePreview.staying_pages.length }}</strong>
+              Entity-/Concept-Seiten bleiben in „{{
+                movePreview.source_workspace.name
+              }}“ – sie werden von mehreren Dokumenten geteilt
+            </li>
+            <li v-if="movePreview.dead_links.length">
+              <strong>{{ movePreview.dead_links.length }}</strong> Verweise
+              werden zu Klartext aufgelöst, weil ihr Ziel zurückbleibt
+            </li>
+            <li v-if="movePreview.topics.length">
+              Themen:
+              {{ movePreview.topics.map((t: any) => t.label).join(", ") }}
+              <span v-if="newTopicsInTarget"
+                >({{ newTopicsInTarget }} werden im Ziel neu angelegt)</span
+              >
+            </li>
+            <li v-if="movePreview.slug_conflicts.length" class="move-warn">
+              {{ movePreview.slug_conflicts.length }} Slug-Konflikte im Ziel –
+              die betroffenen Artikel bekommen eine Nummer angehängt
+            </li>
+          </ul>
+          <p class="field-hint">
+            Embeddings bleiben erhalten und werden nicht neu berechnet.
+          </p>
+        </div>
+
+        <div class="dialog-actions">
+          <button class="btn-secondary" @click="closeMove">Abbrechen</button>
+          <button
+            class="btn-primary"
+            :disabled="!moveTarget || moving || !movePreview"
+            @click="confirmMove"
+          >
+            {{ moving ? "Verschiebe…" : "Verschieben" }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <ConfirmModal
       :show="showConfirm"
       :options="confirmOptions"
@@ -401,6 +543,7 @@ import { useAuthStore } from "../../stores/auth";
 import { useWorkspace } from "../../composables/useWorkspace";
 import { useConfirm } from "../../composables/useConfirm";
 import ConfirmModal from "../../components/ConfirmModal.vue";
+import WorkspaceSelect from "../../components/WorkspaceSelect.vue";
 import DatePicker from "primevue/datepicker";
 import axios from "axios";
 
@@ -446,6 +589,23 @@ const sortBy = ref("created_desc");
 const channels = ref<string[]>([]);
 const refreshingId = ref<string | null>(null);
 let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+// Dokument verschieben
+const showMove = ref(false);
+const moveDoc = ref<any>(null);
+const moveTarget = ref("");
+const movePreview = ref<any>(null);
+const movePreviewLoading = ref(false);
+const moveError = ref("");
+const moving = ref(false);
+
+// Zugriff: Besitzer + Mitglieder
+const allUsers = ref<any[]>([]);
+const members = ref<any[]>([]);
+const editOwnerId = ref<number | null>(null);
+const newMemberId = ref<string>("");
+const newMemberRole = ref("editor");
+const memberError = ref("");
 
 // Themen (Ebene 1)
 const topics = ref<any[]>([]);
@@ -751,14 +911,98 @@ async function loadWorkspace() {
     editDesc.value = ws.value.description || "";
     // Sinnvolle Vorbelegung: gespeicherter Wert, sonst "capped".
     editWikiDepth.value = ws.value.wiki_config?.wiki_depth || "capped";
+    editOwnerId.value = ws.value.created_by;
   } catch (e: any) {
     console.error("Failed to load workspace", e);
+  }
+}
+
+// --- Zugriff: Besitzer & Mitglieder ---------------------------------------
+
+// Erst beim Öffnen des Dialogs laden – User- und Mitgliederliste braucht sonst
+// niemand.
+watch(showSettings, (open) => {
+  if (open) loadAccess();
+});
+
+const ownerLabel = computed(() => {
+  const owner = allUsers.value.find((u) => u.id === ws.value?.created_by);
+  return owner ? `${owner.name} (${owner.email})` : "—";
+});
+
+// Mitglieder verwalten darf der Besitzer (und jeder globale Admin).
+const canManageMembers = computed(
+  () => auth.isAdmin || ws.value?.created_by === auth.user?.id,
+);
+
+const invitableUsers = computed(() =>
+  allUsers.value.filter(
+    (u) =>
+      u.id !== ws.value?.created_by &&
+      !members.value.some((m) => m.user_id === u.id),
+  ),
+);
+
+function roleLabel(role: string) {
+  if (role === "owner" || role === "admin") return "Besitzer";
+  if (role === "editor") return "Bearbeiter";
+  return "Leser";
+}
+
+async function loadAccess() {
+  memberError.value = "";
+  try {
+    const [usersRes, membersRes] = await Promise.all([
+      axios.get("/api/v1/users"),
+      axios.get(`/api/v1/workspaces/${workspaceId.value}/members`),
+    ]);
+    allUsers.value = usersRes.data.users || [];
+    members.value = membersRes.data.members || [];
+  } catch (e: any) {
+    memberError.value = e.response?.data?.error || "Zugriffsdaten nicht ladbar";
+  }
+}
+
+async function addMember() {
+  if (!newMemberId.value) return;
+  memberError.value = "";
+  try {
+    await axios.post(`/api/v1/workspaces/${workspaceId.value}/members`, {
+      user_id: Number(newMemberId.value),
+      role: newMemberRole.value,
+    });
+    newMemberId.value = "";
+    await loadAccess();
+  } catch (e: any) {
+    memberError.value = e.response?.data?.error || "Einladen fehlgeschlagen";
+  }
+}
+
+async function removeMember(userId: number) {
+  memberError.value = "";
+  try {
+    await axios.delete(
+      `/api/v1/workspaces/${workspaceId.value}/members/${userId}`,
+    );
+    await loadAccess();
+  } catch (e: any) {
+    memberError.value = e.response?.data?.error || "Entfernen fehlgeschlagen";
   }
 }
 
 async function updateWs() {
   settingsError.value = "";
   try {
+    // Besitzerwechsel ist eine eigene, Admin-geschützte Route.
+    if (
+      auth.isAdmin &&
+      editOwnerId.value &&
+      editOwnerId.value !== ws.value.created_by
+    ) {
+      await axios.put(`/api/v1/workspaces/${workspaceId.value}/owner`, {
+        user_id: Number(editOwnerId.value),
+      });
+    }
     const res = await axios.put(`/api/v1/workspaces/${workspaceId.value}`, {
       name: editName.value,
       description: editDesc.value || undefined,
@@ -768,6 +1012,64 @@ async function updateWs() {
     showSettings.value = false;
   } catch (e: any) {
     settingsError.value = e.response?.data?.error || "Fehler beim Speichern";
+  }
+}
+
+// --- Dokument verschieben --------------------------------------------------
+
+const newTopicsInTarget = computed(
+  () =>
+    movePreview.value?.topics.filter((t: any) => !t.exists_in_target).length ||
+    0,
+);
+
+function openMove(doc: any) {
+  moveDoc.value = doc;
+  moveTarget.value = "";
+  movePreview.value = null;
+  moveError.value = "";
+  showMove.value = true;
+}
+
+function closeMove() {
+  showMove.value = false;
+  moveDoc.value = null;
+  movePreview.value = null;
+  moveError.value = "";
+}
+
+watch(moveTarget, async (target) => {
+  movePreview.value = null;
+  moveError.value = "";
+  if (!target || !moveDoc.value) return;
+  movePreviewLoading.value = true;
+  try {
+    const res = await axios.get(
+      `/api/v1/documents/${moveDoc.value.id}/move-preview`,
+      { params: { target } },
+    );
+    movePreview.value = res.data.preview;
+  } catch (e: any) {
+    moveError.value = e.response?.data?.error || "Vorschau fehlgeschlagen";
+  } finally {
+    movePreviewLoading.value = false;
+  }
+});
+
+async function confirmMove() {
+  if (!moveTarget.value || !moveDoc.value) return;
+  moving.value = true;
+  moveError.value = "";
+  try {
+    await axios.post(`/api/v1/documents/${moveDoc.value.id}/move`, {
+      target_workspace_id: moveTarget.value,
+    });
+    closeMove();
+    await loadDocs();
+  } catch (e: any) {
+    moveError.value = e.response?.data?.error || "Verschieben fehlgeschlagen";
+  } finally {
+    moving.value = false;
   }
 }
 
@@ -1137,6 +1439,54 @@ function formatDate(dateStr: string) {
   font-size: 0.75rem;
   color: var(--color-text-secondary);
   margin-top: 0.4rem;
+}
+
+/* Zugriff (Besitzer/Mitglieder) + Verschieben-Dialog */
+.access-select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.9rem;
+  flex: 1;
+  min-width: 0;
+}
+.role-select {
+  flex: 0 0 auto;
+  min-width: 120px;
+}
+.field-static {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  padding: 0.25rem 0;
+}
+.move-doc-title {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 1rem;
+  word-break: break-word;
+}
+.move-hint {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+.move-preview {
+  background: var(--color-bg-secondary);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-top: 0.5rem;
+}
+.move-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+.move-list .move-warn {
+  color: #d97706;
 }
 
 /* Document Detail Dialog */

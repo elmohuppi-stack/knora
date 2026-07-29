@@ -38,6 +38,25 @@ export const useAuthStore = defineStore("auth", () => {
     return res.data;
   }
 
+  /**
+   * Holt den aktuellen User vom Server. Nötig, weil die Rolle im localStorage
+   * vom Login stammt – ändert ein Admin sie, sähe das Frontend das sonst erst
+   * nach erneutem Anmelden.
+   */
+  async function fetchMe() {
+    if (!token.value) return null;
+    try {
+      const res = await axios.get("/api/v1/auth/me");
+      user.value = res.data.user;
+      localStorage.setItem("user", JSON.stringify(res.data.user));
+      return res.data.user;
+    } catch (e: any) {
+      // Token ungültig oder User gelöscht → sauber abmelden.
+      if (e?.response?.status === 401) logout();
+      return null;
+    }
+  }
+
   function logout() {
     token.value = null;
     user.value = null;
@@ -60,5 +79,6 @@ export const useAuthStore = defineStore("auth", () => {
     login,
     register,
     logout,
+    fetchMe,
   };
 });

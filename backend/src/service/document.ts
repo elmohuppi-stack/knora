@@ -3,6 +3,7 @@ import {
   documents,
   chunks,
   wikiPages,
+  wikiPageRevisions,
   activityLogs,
   documentTopics,
 } from "../db/schema.ts";
@@ -182,21 +183,85 @@ export async function updateDocumentContent(id: string, content: string) {
 }
 
 export async function deleteDocument(id: string) {
-  // Wiki-Seiten, die auf dieses Dokument verweisen, bereinigen
-  await db
-    .update(wikiPages)
-    .set({ source_document_id: null })
-    .where(eq(wikiPages.source_document_id, id));
-  // Activity-Logs entkoppeln (FK ohne Cascade → sonst Constraint-Fehler beim Löschen).
-  // Log-Historie bleibt erhalten, nur die Dokument-Referenz wird entfernt.
-  await db
-    .update(activityLogs)
-    .set({ document_id: null })
-    .where(eq(activityLogs.document_id, id));
-  // Themen-Zuordnungen entfernen (FK ohne Cascade).
-  await db.delete(documentTopics).where(eq(documentTopics.document_id, id));
-  await db.delete(chunks).where(eq(chunks.document_id, id));
-  await db.delete(documents).where(eq(documents.id, id));
+  await db.transaction(async (tx) => {
+    const [doc] = await tx
+      .select({ workspace_id: documents.workspace_id })
+      .from(documents)
+      .where(eq(documents.id, id))
+      .limit(1);
+    if (!doc) return;
+
+    // Kapitel-/Übersichtsartikel gehören exklusiv zu diesem Dokument und werden
+    // mitgelöscht – sonst blieben ihre Inhalte (und deren Chunks) als Quelle im
+    // Chat auffindbar, obwohl das Dokument weg ist. Ausgenommen sind manuell
+    // bearbeitete Seiten: dort steckt Arbeit drin, die nicht still verschwinden
+    // darf. Entity-/Concept-Seiten sind dokumentübergreifend und werden nur
+    // entkoppelt.
+    const ownPages = await tx
+      .select({ id: wikiPages.id, slug: wikiPages.slug })
+      .from(wikiPages)
+      .where(
+        and(
+          eq(wikiPages.source_document_id, id),
+          inArray(wikiPages.page_type, ["summary", "article"]),
+          eq(wikiPages.manually_edited, false),
+        ),
+      );
+
+    if (ownPages.length > 0) {
+      const pageIds = ownPages.map((p) => p.id);
+      const slugs = ownPages.map((p) => p.slug);
+
+      // Verweise anderer Seiten auf die verschwindenden Slugs entfernen
+      // (in_links/out_links sind jsonb-Arrays).
+      for (const column of ["in_links", "out_links"] as const) {
+        await tx.execute(sql`
+          UPDATE wiki_pages
+          SET ${sql.raw(column)} = COALESCE((
+                SELECT jsonb_agg(e)
+                FROM jsonb_array_elements_text(${sql.raw(column)}) AS e
+                WHERE e <> ALL(${slugs})
+              ), '[]'::jsonb),
+              updated_at = now()
+          WHERE workspace_id = ${doc.workspace_id}
+            AND EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements_text(${sql.raw(column)}) AS e
+              WHERE e = ANY(${slugs})
+            )
+        `);
+      }
+
+      await tx
+        .delete(wikiPageRevisions)
+        .where(inArray(wikiPageRevisions.page_id, pageIds));
+      await tx.delete(wikiPages).where(inArray(wikiPages.id, pageIds));
+      // Chunks der Wiki-Seiten tragen das Präfix "wiki--<page-id>".
+      await tx.delete(chunks).where(
+        inArray(
+          chunks.document_id,
+          pageIds.map((pid) => `wiki--${pid}`),
+        ),
+      );
+    }
+
+    // Verbleibende Seiten (Entity/Concept, manuell bearbeitete) entkoppeln.
+    await tx
+      .update(wikiPages)
+      .set({ source_document_id: null })
+      .where(eq(wikiPages.source_document_id, id));
+
+    // Activity-Logs entkoppeln (FK ohne Cascade → sonst Constraint-Fehler beim Löschen).
+    // Log-Historie bleibt erhalten, nur die Dokument-Referenz wird entfernt.
+    await tx
+      .update(activityLogs)
+      .set({ document_id: null })
+      .where(eq(activityLogs.document_id, id));
+    // Themen-Zuordnungen entfernen (FK ohne Cascade).
+    await tx.delete(documentTopics).where(eq(documentTopics.document_id, id));
+    await tx.delete(chunks).where(eq(chunks.document_id, id));
+    await tx.delete(documents).where(eq(documents.id, id));
+  });
 }
 
 export async function saveChunks(

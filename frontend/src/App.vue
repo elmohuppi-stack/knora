@@ -26,7 +26,7 @@
           <i class="pi pi-folder"></i>
           <span>Workspaces</span>
         </a>
-        <router-link to="/settings" class="nav-item">
+        <router-link v-if="auth.isAdmin" to="/settings" class="nav-item">
           <i class="pi pi-cog"></i>
           <span>Einstellungen</span>
         </router-link>
@@ -69,7 +69,7 @@
         <i class="pi pi-folder"></i>
         <span>Workspaces</span>
       </a>
-      <router-link to="/settings" class="mobile-nav-item">
+      <router-link v-if="auth.isAdmin" to="/settings" class="mobile-nav-item">
         <i class="pi pi-cog"></i>
         <span>Einstellungen</span>
       </router-link>
@@ -125,6 +125,8 @@ watch(sidebarCollapsed, (v) => {
 
 onMounted(() => {
   applyTheme();
+  // Rolle serverseitig auffrischen – der localStorage-Stand stammt vom Login.
+  auth.fetchMe();
 });
 
 watch(isDark, () => {

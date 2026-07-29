@@ -1,5 +1,6 @@
 import { db } from "../db/index.ts";
 import {
+  users,
   workspaces,
   workspaceMembers,
   documents,
@@ -13,6 +14,10 @@ import {
   activityLogs,
 } from "../db/schema.ts";
 import { eq, and, desc, like, or, sql, inArray } from "drizzle-orm";
+import {
+  normalizeRole,
+  type WorkspaceRole,
+} from "../middleware/workspace-access.ts";
 
 /** Generiert einen URL-freundlichen Slug aus einem Namen */
 export function slugify(name: string): string {
@@ -25,37 +30,56 @@ export function slugify(name: string): string {
     .slice(0, 80);
 }
 
-export async function listWorkspaces(userId: number) {
+/**
+ * Workspaces, die der User sehen darf – inklusive seiner Rolle darin.
+ *
+ * Globale Admins sehen alles. Alle anderen sehen, was sie selbst angelegt haben
+ * (workspaces.created_by) plus alles, wo sie Mitglied sind – unabhängig von der
+ * Mitglieds-Rolle. `can_write` fasst für das Frontend zusammen, ob Schreiben
+ * erlaubt ist (globale Rolle viewer schreibt nirgends).
+ */
+export async function listWorkspaces(user: { id: number; role: string }) {
+  const decorate = (w: typeof workspaces.$inferSelect, role: WorkspaceRole) => ({
+    ...w,
+    slug: slugify(w.name),
+    my_role: role,
+    can_write: user.role !== "viewer" && role !== "viewer",
+  });
+
+  if (user.role === "admin") {
+    const all = await db
+      .select()
+      .from(workspaces)
+      .orderBy(desc(workspaces.created_at));
+    return all.map((w) => decorate(w, "owner"));
+  }
+
   const owned = await db
     .select()
     .from(workspaces)
-    .where(eq(workspaces.created_by, userId))
+    .where(eq(workspaces.created_by, user.id))
     .orderBy(desc(workspaces.created_at));
 
   const memberRows = await db
     .select({
       workspace: workspaces,
+      role: workspaceMembers.role,
     })
     .from(workspaceMembers)
     .innerJoin(workspaces, eq(workspaceMembers.workspace_id, workspaces.id))
-    .where(
-      and(
-        eq(workspaceMembers.user_id, userId),
-        eq(workspaceMembers.role, "admin"),
-      ),
-    )
+    .where(eq(workspaceMembers.user_id, user.id))
     .orderBy(desc(workspaces.created_at));
 
-  const memberWorkspaces = memberRows.map((r) => r.workspace);
-  const all = [...owned, ...memberWorkspaces];
-  const seen = new Set<string>();
-  const unique = all.filter((w) => {
-    if (seen.has(w.id)) return false;
-    seen.add(w.id);
-    return true;
-  });
+  const byId = new Map<string, ReturnType<typeof decorate>>();
+  for (const w of owned) byId.set(w.id, decorate(w, "owner"));
+  for (const row of memberRows) {
+    // Eigene Workspaces bleiben owner, auch wenn zusätzlich eine schwächere
+    // Mitgliedschaftszeile existiert.
+    if (byId.has(row.workspace.id)) continue;
+    byId.set(row.workspace.id, decorate(row.workspace, normalizeRole(row.role)));
+  }
 
-  return unique.map((w) => ({ ...w, slug: slugify(w.name) }));
+  return [...byId.values()];
 }
 
 export async function getWorkspace(id: string) {
@@ -81,18 +105,82 @@ export async function createWorkspace(data: {
   chunk_size?: number;
   chunk_overlap?: number;
 }) {
-  const [workspace] = await db
-    .insert(workspaces)
-    .values({
-      id: crypto.randomUUID(),
-      name: data.name,
-      description: data.description || null,
-      created_by: data.created_by,
-      chunk_size: data.chunk_size || 512,
-      chunk_overlap: data.chunk_overlap || 50,
-    })
-    .returning();
-  return workspace;
+  return await db.transaction(async (tx) => {
+    const [workspace] = await tx
+      .insert(workspaces)
+      .values({
+        id: crypto.randomUUID(),
+        name: data.name,
+        description: data.description || null,
+        created_by: data.created_by,
+        chunk_size: data.chunk_size || 512,
+        chunk_overlap: data.chunk_overlap || 50,
+      })
+      .returning();
+
+    // Der Ersteller wird direkt als owner eingetragen. Ohne diese Zeile hängt
+    // der Zugriff allein an created_by und geht bei einem Ownership-Wechsel
+    // verloren.
+    await tx.insert(workspaceMembers).values({
+      workspace_id: workspace.id,
+      user_id: data.created_by,
+      role: "owner",
+    });
+
+    return workspace;
+  });
+}
+
+/**
+ * Überträgt den Besitz auf einen anderen User. Der bisherige Besitzer bleibt
+ * als editor-Mitglied erhalten, damit er den Workspace nicht schlagartig
+ * verliert; der neue Besitzer wird owner-Mitglied.
+ */
+export async function transferOwnership(
+  workspaceId: string,
+  newOwnerId: number,
+) {
+  return await db.transaction(async (tx) => {
+    const [ws] = await tx
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    if (!ws) return null;
+
+    const previousOwnerId = ws.created_by;
+
+    const [updated] = await tx
+      .update(workspaces)
+      .set({ created_by: newOwnerId, updated_at: new Date() })
+      .where(eq(workspaces.id, workspaceId))
+      .returning();
+
+    await upsertMember(tx, workspaceId, newOwnerId, "owner");
+    if (previousOwnerId !== newOwnerId) {
+      await upsertMember(tx, workspaceId, previousOwnerId, "editor");
+    }
+
+    return updated;
+  });
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Legt eine Mitgliedschaft an oder aktualisiert deren Rolle. */
+async function upsertMember(
+  tx: Tx | typeof db,
+  workspaceId: string,
+  userId: number,
+  role: string,
+) {
+  await tx
+    .insert(workspaceMembers)
+    .values({ workspace_id: workspaceId, user_id: userId, role })
+    .onConflictDoUpdate({
+      target: [workspaceMembers.workspace_id, workspaceMembers.user_id],
+      set: { role },
+    });
 }
 
 export async function updateWorkspace(
@@ -175,8 +263,17 @@ export async function deleteWorkspace(id: string) {
 
 export async function listMembers(workspaceId: string) {
   const rows = await db
-    .select()
+    .select({
+      id: workspaceMembers.id,
+      workspace_id: workspaceMembers.workspace_id,
+      user_id: workspaceMembers.user_id,
+      role: workspaceMembers.role,
+      created_at: workspaceMembers.created_at,
+      name: users.name,
+      email: users.email,
+    })
     .from(workspaceMembers)
+    .innerJoin(users, eq(workspaceMembers.user_id, users.id))
     .where(eq(workspaceMembers.workspace_id, workspaceId));
   return rows;
 }
@@ -186,18 +283,36 @@ export async function addMember(
   userId: number,
   role: string = "viewer",
 ) {
+  // Upsert statt Insert: ein erneutes Einladen soll die Rolle ändern und nicht
+  // am Unique-Index (workspace_id, user_id) scheitern.
+  await upsertMember(db, workspaceId, userId, role);
   const [member] = await db
-    .insert(workspaceMembers)
-    .values({
-      workspace_id: workspaceId,
-      user_id: userId,
-      role,
-    })
-    .returning();
+    .select()
+    .from(workspaceMembers)
+    .where(
+      and(
+        eq(workspaceMembers.workspace_id, workspaceId),
+        eq(workspaceMembers.user_id, userId),
+      ),
+    )
+    .limit(1);
   return member;
 }
 
 export async function removeMember(workspaceId: string, userId: number) {
+  // Der Besitzer darf sich nicht selbst entfernen – sonst hätte der Workspace
+  // keinen Verantwortlichen mehr. Erst Ownership übertragen, dann entfernen.
+  const [ws] = await db
+    .select({ created_by: workspaces.created_by })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  if (ws && ws.created_by === userId) {
+    throw new Error(
+      "Der Besitzer kann nicht entfernt werden – übertrage zuerst die Ownership.",
+    );
+  }
+
   await db
     .delete(workspaceMembers)
     .where(

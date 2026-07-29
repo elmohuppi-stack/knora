@@ -3,6 +3,7 @@
 
 import { Hono } from "hono";
 import { authMiddleware } from "../middleware/auth.ts";
+import { assertWorkspaceAccess } from "../middleware/workspace-access.ts";
 import * as activityLogService from "../service/activity-log.ts";
 
 const activityRouter = new Hono();
@@ -15,6 +16,7 @@ activityRouter.get("/", async (c) => {
   if (!workspace_id) {
     return c.json({ error: "workspace_id is required" }, 400);
   }
+  await assertWorkspaceAccess(c.get("user"), workspace_id, "read");
 
   const action = c.req.query("action");
   const status = c.req.query("status");

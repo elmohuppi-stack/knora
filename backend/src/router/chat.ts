@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { authMiddleware } from "../middleware/auth.ts";
+import { assertWorkspaceAccess } from "../middleware/workspace-access.ts";
 import { hybridSearch } from "../service/search.ts";
 import { db } from "../db/index.ts";
 import { chatSessions, chatMessages, modelProviders } from "../db/schema.ts";
@@ -113,6 +114,11 @@ ${context}`;
 chatRouter.post("/", zValidator("json", chatSchema), async (c) => {
   const user = c.get("user");
   const { workspace_id, message, session_id } = c.req.valid("json");
+  // Ohne workspace_id chattet der User über "Alle Workspaces" – dann greift
+  // keine Suche und es gibt nichts zu prüfen.
+  if (workspace_id) {
+    await assertWorkspaceAccess(user, workspace_id, "read");
+  }
 
   const session = await getOrCreateSession(
     user.id,
@@ -186,6 +192,9 @@ chatRouter.post("/", zValidator("json", chatSchema), async (c) => {
 chatRouter.post("/stream", zValidator("json", chatSchema), async (c) => {
   const user = c.get("user");
   const { workspace_id, message, session_id } = c.req.valid("json");
+  if (workspace_id) {
+    await assertWorkspaceAccess(user, workspace_id, "read");
+  }
 
   const session = await getOrCreateSession(
     user.id,
@@ -369,9 +378,20 @@ chatRouter.get("/sessions", async (c) => {
   return c.json({ sessions });
 });
 
-// Messages einer Session
+// Messages einer Session. Nur eigene Sessions – sonst wären fremde Chats über
+// eine geratene Session-ID lesbar.
 chatRouter.get("/sessions/:id/messages", async (c) => {
+  const user = c.get("user");
   const id = c.req.param("id");
+
+  const [session] = await db
+    .select({ user_id: chatSessions.user_id })
+    .from(chatSessions)
+    .where(eq(chatSessions.id, id))
+    .limit(1);
+  if (!session) return c.json({ error: "Session not found" }, 404);
+  if (session.user_id !== user.id) return c.json({ error: "Forbidden" }, 403);
+
   const msgs = await db
     .select()
     .from(chatMessages)

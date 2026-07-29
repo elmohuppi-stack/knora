@@ -2,12 +2,16 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { authMiddleware } from "../middleware/auth.ts";
+import { workspaceParamAccess } from "../middleware/workspace-access.ts";
 import * as wikiService from "../service/wiki.ts";
 import * as chatWiki from "../service/wiki-from-chat.ts";
 import * as activityLog from "../service/activity-log.ts";
 
 const wikiRouter = new Hono();
 wikiRouter.use("*", authMiddleware);
+// Alle Wiki-Routen liegen unter /:workspaceId/… – GET = lesen, alles andere
+// schreiben.
+wikiRouter.use("/:workspaceId/*", workspaceParamAccess());
 
 const createSchema = z.object({
   slug: z.string().min(1).max(255),

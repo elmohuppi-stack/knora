@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { authRouter } from "./router/auth.ts";
 import { workspaceRouter } from "./router/workspace.ts";
 import { adminRouter } from "./router/admin.ts";
+import { userRouter } from "./router/user.ts";
 import { modelRouter } from "./router/model.ts";
 import { documentRouter } from "./router/document.ts";
 import { searchRouter } from "./router/search.ts";
@@ -35,6 +36,9 @@ app.route("/api/v1/workspaces", workspaceRouter);
 
 // Admin Routes (User-Management)
 app.route("/api/v1/admin", adminRouter);
+
+// User Routes (schlanke Liste für Auswahlfelder)
+app.route("/api/v1/users", userRouter);
 
 // Model Provider Routes
 app.route("/api/v1/models", modelRouter);
