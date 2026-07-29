@@ -113,16 +113,55 @@
         </button>
       </div>
 
-      <!-- Reader: kompakte Ergebnisliste zum Weiterblättern -->
+      <!-- Reader: kompakte Ergebnisliste zum Weiterblättern. Artikel aus einem
+           Quell-Dokument stehen als aufklappbare Gruppe unter ihrer Übersicht. -->
       <div class="rail-results" v-if="selectedPage">
         <div class="rail-results-head">{{ total }} Treffer</div>
-        <div
-          v-for="p in pages"
-          :key="p.id"
-          :class="['rail-result', { active: selectedSlug === p.slug }]"
-          @click="selectPage(p)"
-        >
-          {{ stripWikiLinks(p.title) }}
+        <div v-for="node in railTree" :key="node.page.id" class="rail-group">
+          <div
+            :class="[
+              'rail-result',
+              {
+                active: selectedSlug === node.page.slug,
+                'has-children': node.children.length,
+              },
+            ]"
+            @click="selectPage(node.page)"
+          >
+            <button
+              v-if="node.children.length"
+              class="rail-caret"
+              @click.stop="toggleGroup(node.page.slug)"
+              :title="
+                isExpanded(node.page.slug)
+                  ? 'Kapitel einklappen'
+                  : 'Kapitel ausklappen'
+              "
+            >
+              {{ isExpanded(node.page.slug) ? "▾" : "▸" }}
+            </button>
+            <span class="rail-label">{{ stripWikiLinks(node.page.title) }}</span>
+            <span
+              v-if="node.children.length"
+              class="rail-count"
+              :title="`${node.children.length} Kapitel`"
+              >{{ node.children.length }}</span
+            >
+          </div>
+          <div
+            v-if="node.children.length && isExpanded(node.page.slug)"
+            class="rail-children"
+          >
+            <div
+              v-for="c in node.children"
+              :key="c.id"
+              :class="['rail-result', 'rail-child', { active: selectedSlug === c.slug }]"
+              @click="selectPage(c)"
+            >
+              <span class="rail-child-no">{{ c.sort_order }}</span>
+              <span class="rail-label">{{ stripWikiLinks(c.title) }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </aside>
@@ -217,9 +256,16 @@
             @click="selectPage(p)"
           >
             <span :class="['card-type', p.page_type]">{{
-              typeLabel(p.page_type)
+              pageRoleLabel(p)
             }}</span>
             <h3 class="card-title">{{ stripWikiLinks(p.title) }}</h3>
+            <!-- Zugehörigkeit sichtbar machen: Kapitel N aus welchem Dokument -->
+            <p v-if="p.parent_slug" class="card-parent">
+              Kapitel {{ p.sort_order }}
+              <template v-if="p.document_title">
+                · {{ stripWikiLinks(p.document_title) }}
+              </template>
+            </p>
             <p class="card-summary">{{ stripWikiLinks(p.summary) }}</p>
             <div class="card-meta">
               <span>{{ formatDate(p.updated_at) }}</span>
@@ -236,10 +282,27 @@
           <button class="btn-back" @click="goBackToOverview">
             ← Zurück zu Ergebnissen
           </button>
+          <!-- Verortung im Dokument-Verbund: Übersicht › Kapitel N von M -->
+          <div class="reader-crumbs" v-if="chapterContext">
+            <button
+              v-if="chapterContext.parent"
+              class="crumb-link"
+              @click="selectPage(chapterContext.parent)"
+            >
+              📚 {{ stripWikiLinks(chapterContext.parent.title) }}
+            </button>
+            <span v-if="chapterContext.parent" class="crumb-sep">›</span>
+            <span class="crumb-current">
+              Kapitel {{ chapterContext.index }} von {{ chapterContext.count }}
+            </span>
+          </div>
           <h2>{{ stripWikiLinks(selectedPage.title) }}</h2>
           <div class="reader-meta">
             <span :class="['type-tag', selectedPage.page_type]">
-              {{ typeLabel(selectedPage.page_type) }}
+              {{ pageRoleLabel(selectedPage) }}
+            </span>
+            <span v-if="childChapters.length" class="type-tag chapters">
+              {{ childChapters.length }} Kapitel
             </span>
             <span>Version {{ selectedPage.version }}</span>
             <span>{{ formatDate(selectedPage.updated_at) }}</span>
@@ -313,6 +376,36 @@
             </button>
           </div>
         </div>
+
+        <!-- Kapitel-Navigation: linear durch das Quell-Dokument blättern.
+             Steht bewusst NACH dem v-if/v-else-Paar oben, damit die Kette
+             reader-body / reader-edit zusammenhängend bleibt. -->
+        <nav v-if="!editing && chapterContext" class="chapter-nav">
+          <button
+            class="chapter-nav-btn"
+            :disabled="!chapterContext.prev"
+            @click="chapterContext.prev && selectPage(chapterContext.prev)"
+          >
+            <span class="chapter-nav-dir">← Vorheriges Kapitel</span>
+            <span class="chapter-nav-title">{{
+              chapterContext.prev
+                ? stripWikiLinks(chapterContext.prev.title)
+                : "—"
+            }}</span>
+          </button>
+          <button
+            class="chapter-nav-btn next"
+            :disabled="!chapterContext.next"
+            @click="chapterContext.next && selectPage(chapterContext.next)"
+          >
+            <span class="chapter-nav-dir">Nächstes Kapitel →</span>
+            <span class="chapter-nav-title">{{
+              chapterContext.next
+                ? stripWikiLinks(chapterContext.next.title)
+                : "—"
+            }}</span>
+          </button>
+        </nav>
 
         <div v-if="!editing" class="reader-footer">
           <div v-if="selectedPage.out_links?.length" class="links-section">
@@ -565,6 +658,95 @@ const dateRangeLabel = computed(() => {
 const selectedTopics = computed(() =>
   allTopics.value.filter((t) => filterTopicIds.value.includes(t.id)),
 );
+
+// ---- Hierarchie: Kapitel gehören zu ihrer Übersichtsseite ----------------
+// Generierte Kapitel-Artikel tragen parent_slug = Slug der Übersicht und
+// sort_order = Kapitelnummer. Die Rail baut daraus einen zweistufigen Baum,
+// damit erkennbar ist, welche Artikel aus demselben Dokument stammen.
+
+/** Slugs, die mindestens ein Kapitel unter sich haben (= Übersichtsseiten). */
+const parentSlugs = computed(
+  () => new Set(pages.value.map((p) => p.parent_slug).filter(Boolean)),
+);
+
+const railTree = computed(() => {
+  const bySlug = new Set(pages.value.map((p) => p.slug));
+  const childrenOf = new Map<string, any[]>();
+  for (const p of pages.value) {
+    // Nur einhängen, wenn die Übersicht im aktuellen Ergebnis auch vorkommt –
+    // sonst würde ein Kapitel bei aktivem Filter/Suche komplett verschwinden.
+    if (p.parent_slug && bySlug.has(p.parent_slug)) {
+      const arr = childrenOf.get(p.parent_slug) || [];
+      arr.push(p);
+      childrenOf.set(p.parent_slug, arr);
+    }
+  }
+  for (const arr of childrenOf.values()) {
+    arr.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  }
+  return pages.value
+    .filter((p) => !(p.parent_slug && bySlug.has(p.parent_slug)))
+    .map((p) => ({ page: p, children: childrenOf.get(p.slug) || [] }));
+});
+
+// Auf-/Zuklappen: Default ist zu (kurze Liste); die Gruppe des offenen Artikels
+// klappt automatisch auf. Ein Caret-Klick setzt einen expliziten Override, der
+// den Default in BEIDE Richtungen überstimmt.
+const groupOverrides = ref<Record<string, boolean>>({});
+const activeGroupSlug = computed(() => {
+  const p = selectedPage.value;
+  if (!p) return "";
+  return p.parent_slug || p.slug;
+});
+function isExpanded(slug: string): boolean {
+  const override = groupOverrides.value[slug];
+  return override !== undefined ? override : activeGroupSlug.value === slug;
+}
+function toggleGroup(slug: string) {
+  groupOverrides.value = {
+    ...groupOverrides.value,
+    [slug]: !isExpanded(slug),
+  };
+}
+// Wechselt der Nutzer in eine Gruppe, gilt wieder der Default (= offen); ein
+// altes „zugeklappt" soll den gerade geöffneten Artikel nicht verstecken.
+watch(activeGroupSlug, (slug) => {
+  if (slug && groupOverrides.value[slug] === false) {
+    const next = { ...groupOverrides.value };
+    delete next[slug];
+    groupOverrides.value = next;
+  }
+});
+
+/** Kapitel-Kontext des offenen Artikels (Übersicht, Position, Nachbarn). */
+const chapterContext = computed(() => {
+  const p = selectedPage.value;
+  if (!p?.parent_slug) return null;
+  const siblings = pages.value
+    .filter((x) => x.parent_slug === p.parent_slug)
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  const idx = siblings.findIndex((x) => x.slug === p.slug);
+  if (idx === -1) return null;
+  return {
+    parent: pages.value.find((x) => x.slug === p.parent_slug) || null,
+    index: p.sort_order || idx + 1,
+    count: Math.max(
+      siblings.length,
+      ...siblings.map((s) => Number(s.sort_order) || 0),
+    ),
+    prev: siblings[idx - 1] || null,
+    next: siblings[idx + 1] || null,
+  };
+});
+
+/** Kapitel des offenen Artikels – nur befüllt, wenn er eine Übersicht ist. */
+const childChapters = computed(() => {
+  const p = selectedPage.value;
+  if (!p) return [];
+  return pages.value
+    .filter((x) => x.parent_slug === p.slug)
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+});
 
 onMounted(() => {
   mobileMq = window.matchMedia("(max-width: 768px)");
@@ -1073,6 +1255,18 @@ function typeLabel(type: string): string {
   return map[type] || type;
 }
 
+/**
+ * Typ-Label mit Rolle im Dokument-Verbund: Übersichtsseiten und Kapitel sind
+ * beide page_type "summary", lesen sich als "Zusammenfassung" aber gleich.
+ */
+function pageRoleLabel(p: any): string {
+  if (p?.page_type === "summary") {
+    if (p.parent_slug) return "📄 Kapitel";
+    if (parentSlugs.value.has(p.slug)) return "📚 Übersicht";
+  }
+  return typeLabel(p?.page_type);
+}
+
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString("de-DE", {
     day: "2-digit",
@@ -1322,10 +1516,17 @@ function closeImport() {
   letter-spacing: 0.03em;
 }
 .rail-result {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   padding: 0.5rem;
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.82rem;
+}
+.rail-label {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1336,6 +1537,60 @@ function closeImport() {
 .rail-result.active {
   background: var(--color-sidebar-active);
   color: #fff;
+}
+/* Übersichtsseite eines Dokument-Verbunds: Anker der Gruppe */
+.rail-result.has-children .rail-label {
+  font-weight: 600;
+}
+.rail-group + .rail-group {
+  margin-top: 0.1rem;
+}
+.rail-caret {
+  flex: 0 0 auto;
+  width: 1.1rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  opacity: 0.65;
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+.rail-caret:hover {
+  opacity: 1;
+}
+.rail-count {
+  flex: 0 0 auto;
+  padding: 0.05rem 0.35rem;
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
+}
+.rail-result.active .rail-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+/* Kapitel: eingerückt an einer Führungslinie unter ihrer Übersicht */
+.rail-children {
+  margin-left: 0.6rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--color-border);
+}
+.rail-child {
+  font-size: 0.79rem;
+}
+.rail-child-no {
+  flex: 0 0 auto;
+  min-width: 1.1rem;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+}
+.rail-child.active .rail-child-no {
+  color: rgba(255, 255, 255, 0.8);
 }
 
 /* ---- Main / Discovery ---- */
@@ -1522,6 +1777,14 @@ function closeImport() {
   line-height: 1.3;
   margin: 0;
 }
+.card-parent {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  margin: -0.25rem 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .card-summary {
   font-size: 0.82rem;
   color: var(--color-text-secondary);
@@ -1593,6 +1856,85 @@ function closeImport() {
 .type-tag.article {
   background: #f0f0f0;
   color: #666;
+}
+.type-tag.chapters {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+}
+/* Breadcrumb: Übersicht › Kapitel N von M */
+.reader-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+.crumb-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary, #0052d9);
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  max-width: 30rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.crumb-link:hover {
+  text-decoration: underline;
+}
+.crumb-sep {
+  opacity: 0.6;
+}
+
+/* Kapitel-Navigation unter dem Artikel */
+.chapter-nav {
+  display: flex;
+  gap: 0.75rem;
+  max-width: 750px;
+  margin: 2rem 0 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+.chapter-nav-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chapter-nav-btn.next {
+  text-align: right;
+}
+.chapter-nav-btn:hover:not(:disabled) {
+  border-color: var(--color-primary, #0052d9);
+}
+.chapter-nav-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.chapter-nav-dir {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+}
+.chapter-nav-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .reader-aliases {
   display: flex;

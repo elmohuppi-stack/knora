@@ -93,12 +93,9 @@ export const workspaceMembers = pgTable(
     role: varchar("role", { length: 20 }).notNull().default("viewer"),
     created_at: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => ({
-    uniqueMember: uniqueIndex("unique_workspace_member").on(
-      table.workspace_id,
-      table.user_id,
-    ),
-  }),
+  (table) => [
+    uniqueIndex("unique_workspace_member").on(table.workspace_id, table.user_id),
+  ],
 );
 
 export const documents = pgTable(
@@ -135,9 +132,7 @@ export const documents = pgTable(
     updated_at: timestamp("updated_at").defaultNow().notNull(),
     processed_at: timestamp("processed_at"),
   },
-  (table) => ({
-    channelIdx: index("documents_channel_idx").on(table.channel),
-  }),
+  (table) => [index("documents_channel_idx").on(table.channel)],
 );
 
 // Themen pro Workspace (Ebene 1). First-Class-Objekte, editierbar; Zuordnung
@@ -156,12 +151,9 @@ export const topics = pgTable(
     sort_order: integer("sort_order").default(0).notNull(),
     created_at: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => ({
-    uniqueTopicSlug: uniqueIndex("unique_workspace_topic_slug").on(
-      table.workspace_id,
-      table.slug,
-    ),
-  }),
+  (table) => [
+    uniqueIndex("unique_workspace_topic_slug").on(table.workspace_id, table.slug),
+  ],
 );
 
 export const documentTopics = pgTable(
@@ -178,12 +170,9 @@ export const documentTopics = pgTable(
     source: varchar("source", { length: 20 }).default("auto").notNull(),
     created_at: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => ({
-    uniqueDocTopic: uniqueIndex("unique_document_topic").on(
-      table.document_id,
-      table.topic_id,
-    ),
-  }),
+  (table) => [
+    uniqueIndex("unique_document_topic").on(table.document_id, table.topic_id),
+  ],
 );
 
 export const chunks = pgTable("chunks", {
@@ -219,6 +208,13 @@ export const wikiPages = pgTable(
     source_document_id: varchar("source_document_id", {
       length: 36,
     }).references(() => documents.id),
+    // Hierarchie: Kapitel-Artikel zeigen auf den Slug ihrer Übersichtsseite im
+    // selben Workspace (kein FK, weil der Slug der stabile Adressraum ist und
+    // die Übersicht erst NACH den Kapiteln entsteht). Übersichtsseiten und
+    // eigenständige Artikel haben parent_slug = null. sort_order = Kapitelnummer
+    // (1-basiert), 0 für alles ohne Reihenfolge.
+    parent_slug: varchar("parent_slug", { length: 255 }),
+    sort_order: integer("sort_order").default(0).notNull(),
     out_links: jsonb("out_links").default([]).notNull(),
     in_links: jsonb("in_links").default([]).notNull(),
     aliases: jsonb("aliases").default([]).notNull(),
@@ -234,12 +230,10 @@ export const wikiPages = pgTable(
     created_at: timestamp("created_at").defaultNow().notNull(),
     updated_at: timestamp("updated_at").defaultNow().notNull(),
   },
-  (table) => ({
-    uniqueSlug: uniqueIndex("unique_workspace_slug").on(
-      table.workspace_id,
-      table.slug,
-    ),
-  }),
+  (table) => [
+    uniqueIndex("unique_workspace_slug").on(table.workspace_id, table.slug),
+    index("wiki_pages_parent_idx").on(table.workspace_id, table.parent_slug),
+  ],
 );
 
 // Ebene 4: Versionshistorie – Snapshot der Seite VOR jeder manuellen Änderung.

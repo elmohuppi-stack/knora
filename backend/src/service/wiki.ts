@@ -196,9 +196,15 @@ export async function listPages(
   })();
 
   // LEFT JOIN auf documents, damit Kanal/Datum/published-Sort funktionieren.
-  // getTableColumns hält die Rückgabe auf die flache wikiPages-Form.
+  // getTableColumns hält die Rückgabe auf die flache wikiPages-Form; zusätzlich
+  // Titel/Typ des Quell-Dokuments, damit die UI zusammengehörige Artikel unter
+  // ihrem Dokument gruppieren kann, ohne Dokumente separat nachzuladen.
   const rows = await db
-    .select(getTableColumns(wikiPages))
+    .select({
+      ...getTableColumns(wikiPages),
+      document_title: documents.title,
+      document_type: documents.type,
+    })
     .from(wikiPages)
     .leftJoin(documents, eq(wikiPages.source_document_id, documents.id))
     .where(conditions)
@@ -357,6 +363,8 @@ export async function createPage(data: {
   page_type?: string;
   status?: string;
   source_document_id?: string;
+  parent_slug?: string | null;
+  sort_order?: number;
   created_by?: number;
   page_metadata?: Record<string, unknown>;
 }) {
@@ -373,6 +381,8 @@ export async function createPage(data: {
       page_type: data.page_type || "article",
       status: data.status || "published",
       source_document_id: data.source_document_id || null,
+      parent_slug: data.parent_slug || null,
+      sort_order: data.sort_order || 0,
       created_by: data.created_by || null,
       page_metadata: data.page_metadata || {},
     })
@@ -448,6 +458,27 @@ export async function updatePage(
     await syncWikiPageToChunks(workspaceId, page.id, page.content);
   }
 
+  return page || null;
+}
+
+/**
+ * Setzt die Struktur-Felder (Eltern-Slug + Kapitelnummer) einer Seite.
+ * Bewusst getrennt von `updatePage`: Hierarchie ist Struktur, kein Inhalt – sie
+ * wird deshalb auch bei manuell editierten (gelockten) Seiten geschrieben und
+ * erzeugt keine neue Version und keinen Revisions-Snapshot.
+ */
+export async function setPageHierarchy(
+  workspaceId: string,
+  slug: string,
+  data: { parent_slug: string | null; sort_order: number },
+) {
+  const [page] = await db
+    .update(wikiPages)
+    .set({ parent_slug: data.parent_slug, sort_order: data.sort_order })
+    .where(
+      and(eq(wikiPages.workspace_id, workspaceId), eq(wikiPages.slug, slug)),
+    )
+    .returning();
   return page || null;
 }
 

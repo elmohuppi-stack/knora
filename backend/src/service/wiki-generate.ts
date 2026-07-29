@@ -59,6 +59,13 @@ interface WikiResult {
 interface Chapter {
   title: string;
   text: string;
+  /**
+   * true = `title` ist nur ein mechanischer Notnagel (Größen-Split innerhalb
+   * EINER Überschrift, z.B. „Transkript"/„Transkript (Teil 3)"). Solche Titel
+   * sagen nichts über den Inhalt, deshalb hat der vom LLM generierte Artikel-
+   * titel Vorrang. Bei echten Dokument-Überschriften bleibt es umgekehrt.
+   */
+  titleIsFallback?: boolean;
 }
 
 // Zielgröße pro Kapitel in Zeichen (~10-15 Seiten) – das Fenster, das die
@@ -240,14 +247,23 @@ export async function generateWikiArticles(
     // Titel-Priorität: echte Dokument-Überschrift → vom LLM generierter Artikel-
     // titel (# …) → generischer Fallback. So bekommen auch PDFs ohne Markdown-
     // Überschriften aussagekräftige Kapitel-Titel statt "Kapitel N".
+    // Bei mechanischen Größen-Splits (titleIsFallback) ist die Reihenfolge
+    // umgedreht: „Transkript (Teil 3)" sagt nichts, der Artikel-Titel schon.
     const titleMatch = body.match(/^#\s+(.+)/m);
-    const chapterTitle =
-      chapter.title ||
-      (titleMatch
-        ? titleMatch[1].trim()
-        : multiChapter
-          ? `${doc.title} – Teil ${i + 1}`
-          : doc.title);
+    const llmTitle = titleMatch ? titleMatch[1].trim() : "";
+    let chapterTitle =
+      (chapter.titleIsFallback
+        ? llmTitle || chapter.title
+        : chapter.title || llmTitle) ||
+      (multiChapter ? `${doc.title} – Teil ${i + 1}` : doc.title);
+    // Kein Kapitel darf denselben Titel wie die Übersichtsseite tragen – sonst
+    // steht der Dokumenttitel doppelt in der Navigation.
+    if (multiChapter && sameTitle(chapterTitle, doc.title)) {
+      chapterTitle =
+        llmTitle && !sameTitle(llmTitle, doc.title)
+          ? llmTitle
+          : `${doc.title} – Teil ${i + 1}`;
+    }
 
     // Bei mehreren Kapiteln eindeutiger Slug pro Kapitel; bei einem Kapitel der
     // bisherige Summary-Slug (Rückwärtskompatibilität + sauberer Re-Import).
@@ -259,9 +275,13 @@ export async function generateWikiArticles(
       summary: summaryLine,
       page_type: "summary",
       source_document_id: docId,
+      // Kapitel hängen an der Übersichtsseite (Basis-Slug), die weiter unten
+      // erzeugt wird; bei nur einem Kapitel gibt es keine Übersicht.
+      parent_slug: multiChapter ? baseSlug : null,
+      sort_order: multiChapter ? i + 1 : 0,
     });
     chapterSlugs.push(chapterSlug);
-    chapterLinks.push(`- [[${chapterSlug}|${chapterTitle}]]`);
+    chapterLinks.push(`- Kapitel ${i + 1}: [[${chapterSlug}|${chapterTitle}]]`);
     if (!summaryPage) summaryPage = page;
     console.log(
       `[wiki-gen] ✅ Kapitel ${i + 1}/${chapters.length}: "${chapterTitle}" (${body.length} Zeichen)`,
@@ -281,6 +301,8 @@ export async function generateWikiArticles(
       summary: `Übersicht über ${chapters.length} Kapitel aus „${doc.title}".`,
       page_type: "summary",
       source_document_id: docId,
+      parent_slug: null,
+      sort_order: 0,
     });
   }
 
@@ -555,7 +577,11 @@ function splitIntoChapters(content: string, targetChars: number): Chapter[] {
   // Keine Überschriften: reiner Größen-Fallback an Absatzgrenzen. Titel bleibt leer
   // – der Kapitel-Titel wird später aus dem LLM-generierten Artikel abgeleitet.
   if (matches.length === 0) {
-    return packBySize(text, targetChars).map((t) => ({ title: "", text: t }));
+    return packBySize(text, targetChars).map((t) => ({
+      title: "",
+      text: t,
+      titleIsFallback: true,
+    }));
   }
 
   // In Abschnitte zerlegen (jede Überschrift startet einen neuen Abschnitt).
@@ -582,14 +608,21 @@ function splitIntoChapters(content: string, targetChars: number): Chapter[] {
     if (curText.trim()) {
       // Leerer Titel = keine echte Überschrift gefunden; wird später aus dem
       // LLM-Artikel oder als "Titel – Teil N" abgeleitet.
-      chapters.push({ title: curTitle, text: curText.trim() });
+      chapters.push({
+        title: curTitle,
+        text: curText.trim(),
+        titleIsFallback: !curTitle,
+      });
     }
     curText = "";
     curTitle = "";
   };
 
   for (const sec of sections) {
-    // Einzelabschnitt größer als das Fenster: hart nach Größe splitten.
+    // Einzelabschnitt größer als das Fenster: hart nach Größe splitten. Die
+    // Überschrift beschreibt dann den GANZEN Abschnitt (z.B. „Transkript") und
+    // nicht das einzelne Stück – deshalb sind alle Teil-Titel nur Fallback und
+    // der inhaltliche Titel kommt später aus dem generierten Artikel.
     if (sec.body.length > targetChars) {
       flush();
       const parts = packBySize(sec.body, targetChars);
@@ -601,6 +634,7 @@ function splitIntoChapters(content: string, targetChars: number): Chapter[] {
               : `${sec.heading} (Teil ${i + 1})`
             : "",
           text: p.trim(),
+          titleIsFallback: true,
         });
       });
       continue;
@@ -666,6 +700,17 @@ function mergeCandidate(map: Map<string, ExtractedItem>, it: ExtractedItem) {
   }
 }
 
+/** Vergleicht Titel tolerant (Groß-/Kleinschreibung, Whitespace, Satzzeichen-Rand). */
+function sameTitle(a: string, b: string): boolean {
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/^[\s"„“'*#-]+|[\s"„“'*.:-]+$/g, "")
+      .trim();
+  return !!a && !!b && norm(a) === norm(b);
+}
+
 /** Legt eine Wiki-Seite an oder aktualisiert sie, falls der Slug schon existiert. */
 async function upsertPage(
   workspaceId: string,
@@ -676,16 +721,29 @@ async function upsertPage(
     summary: string;
     page_type: string;
     source_document_id?: string;
+    parent_slug?: string | null;
+    sort_order?: number;
   },
 ) {
   const existing = await wikiService.getPage(workspaceId, slug);
   if (existing) {
-    return await wikiService.updatePage(workspaceId, slug, {
+    const page = await wikiService.updatePage(workspaceId, slug, {
       title: data.title,
       content: data.content,
       summary: data.summary,
       page_type: data.page_type,
     });
+    // Struktur getrennt schreiben: greift auch bei manuell editierten Seiten,
+    // deren Inhalt der Lock in updatePage bewusst unangetastet lässt.
+    if (data.parent_slug !== undefined || data.sort_order !== undefined) {
+      return (
+        (await wikiService.setPageHierarchy(workspaceId, slug, {
+          parent_slug: data.parent_slug ?? null,
+          sort_order: data.sort_order ?? 0,
+        })) || page
+      );
+    }
+    return page;
   }
   return await wikiService.createPage({
     workspace_id: workspaceId,
@@ -695,6 +753,8 @@ async function upsertPage(
     summary: data.summary,
     page_type: data.page_type,
     source_document_id: data.source_document_id,
+    parent_slug: data.parent_slug ?? null,
+    sort_order: data.sort_order ?? 0,
   });
 }
 

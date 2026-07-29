@@ -124,6 +124,9 @@ source .env
 docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0002_naive_ultimo.sql
 docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0003_careless_ghost_rider.sql
 docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0004_polite_mongoose.sql
+# 0005 ist idempotent (IF NOT EXISTS) und enthält ein Backfill, das bereits
+# generierte Kapitel-Artikel an ihre Übersichtsseite hängt.
+docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0005_flowery_spyke.sql
 ```
 
 **Welche Migrationen fehlen?** Vorhandene Spalten/Tabellen prüfen, z. B.:
@@ -133,6 +136,8 @@ docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0004_pol
 docker compose exec -T db psql -U "$DB_USER" -d knora -c "\d documents" | grep channel
 # Gibt es die topics-Tabelle (0003) / wiki_page_revisions (0004)?
 docker compose exec -T db psql -U "$DB_USER" -d knora -c "\dt" | grep -E "topics|wiki_page_revisions"
+# Hat wiki_pages schon parent_slug/sort_order (0005)?
+docker compose exec -T db psql -U "$DB_USER" -d knora -c "\d wiki_pages" | grep -E "parent_slug|sort_order"
 ```
 
 Nur die Migrationen einspielen, deren Objekte noch fehlen.
