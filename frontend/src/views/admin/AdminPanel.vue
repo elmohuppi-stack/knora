@@ -29,6 +29,7 @@
     <div v-if="tab === 'users'" class="content">
       <div class="section-header">
         <h3>👥 Benutzer</h3>
+        <button class="btn-primary" @click="openCreateUser">+ Neu</button>
       </div>
       <table class="table" v-if="users.length">
         <thead>
@@ -71,6 +72,60 @@
         </tbody>
       </table>
       <p v-else class="empty">Lade Benutzer...</p>
+
+      <!-- Create User Dialog -->
+      <div
+        v-if="showCreateUser"
+        class="dialog-overlay"
+        @click.self="showCreateUser = false"
+      >
+        <div class="dialog">
+          <h3>Neuen Benutzer anlegen</h3>
+          <div class="field">
+            <label>Name *</label>
+            <input v-model="userForm.name" placeholder="z.B. Anna Muster" />
+          </div>
+          <div class="field">
+            <label>E-Mail *</label>
+            <input
+              v-model="userForm.email"
+              type="email"
+              autocomplete="off"
+              placeholder="anna@example.com"
+            />
+          </div>
+          <div class="field">
+            <label>Passwort * (min. 8 Zeichen)</label>
+            <input
+              v-model="userForm.password"
+              type="password"
+              autocomplete="new-password"
+              placeholder="••••••••"
+            />
+          </div>
+          <div class="field">
+            <label>Rolle *</label>
+            <select v-model="userForm.role">
+              <option value="viewer">Viewer</option>
+              <option value="editor">Editor</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div class="dialog-actions">
+            <button class="btn-secondary" @click="showCreateUser = false">
+              Abbrechen
+            </button>
+            <button
+              class="btn-primary"
+              @click="createUser"
+              :disabled="!canCreateUser || creatingUser"
+            >
+              {{ creatingUser ? "Speichert..." : "Anlegen" }}
+            </button>
+          </div>
+          <p v-if="createUserError" class="error">{{ createUserError }}</p>
+        </div>
+      </div>
     </div>
 
     <!-- Model Provider Management -->
@@ -233,7 +288,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "../../stores/auth";
 import { useConfirm } from "../../composables/useConfirm";
@@ -261,6 +316,23 @@ const form = ref({
   api_key: "",
   default_model: "",
 });
+
+// Benutzer anlegen
+const showCreateUser = ref(false);
+const creatingUser = ref(false);
+const createUserError = ref("");
+const userForm = ref({
+  name: "",
+  email: "",
+  password: "",
+  role: "viewer",
+});
+const canCreateUser = computed(
+  () =>
+    userForm.value.name.trim().length > 0 &&
+    /^\S+@\S+\.\S+$/.test(userForm.value.email.trim()) &&
+    userForm.value.password.length >= 8,
+);
 
 // Activity Log
 const logs = ref<any[]>([]);
@@ -299,6 +371,35 @@ async function loadUsers() {
     }
   } catch (e: any) {
     console.error("Failed to load users", e);
+  }
+}
+
+function openCreateUser() {
+  createUserError.value = "";
+  userForm.value = { name: "", email: "", password: "", role: "viewer" };
+  showCreateUser.value = true;
+}
+
+async function createUser() {
+  createUserError.value = "";
+  creatingUser.value = true;
+  try {
+    const res = await axios.post("/api/v1/admin/users", {
+      name: userForm.value.name.trim(),
+      email: userForm.value.email.trim().toLowerCase(),
+      password: userForm.value.password,
+      role: userForm.value.role,
+    });
+    users.value.unshift(res.data.user);
+    showCreateUser.value = false;
+  } catch (e: any) {
+    const msg = e.response?.data?.error;
+    createUserError.value =
+      msg === "Email already registered"
+        ? "Diese E-Mail ist bereits registriert."
+        : msg || "Fehler beim Anlegen";
+  } finally {
+    creatingUser.value = false;
   }
 }
 

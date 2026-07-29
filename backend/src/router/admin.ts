@@ -12,10 +12,28 @@ const roleSchema = z.object({
   role: z.enum(["admin", "editor", "viewer"]),
 });
 
+const createUserSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  name: z.string().min(1),
+  role: z.enum(["admin", "editor", "viewer"]).default("viewer"),
+});
+
 // User-Liste (Admin only)
 adminRouter.get("/users", async (c) => {
   const list = await userService.listUsers();
   return c.json({ users: list });
+});
+
+// User anlegen
+adminRouter.post("/users", zValidator("json", createUserSchema), async (c) => {
+  const { email, password, name, role } = c.req.valid("json");
+  try {
+    const user = await userService.createUser(email, password, name, role);
+    return c.json({ user }, 201);
+  } catch (e: any) {
+    return c.json({ error: e?.message || "Failed to create user" }, 400);
+  }
 });
 
 // User-Rolle ändern
