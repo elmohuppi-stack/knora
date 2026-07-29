@@ -35,9 +35,20 @@ export async function listDocuments(
   if (opts.type) conditions.push(eq(documents.type, opts.type));
   if (opts.channel) conditions.push(eq(documents.channel, opts.channel));
   if (opts.query) conditions.push(ilike(documents.title, `%${opts.query}%`));
-  // Datumsbereich filtert auf das Import-Datum (created_at, immer vorhanden).
-  if (opts.dateFrom) conditions.push(gte(documents.created_at, opts.dateFrom));
-  if (opts.dateTo) conditions.push(lte(documents.created_at, opts.dateTo));
+  // Datumsbereich filtert auf das Sitzungs-/Veröffentlichungsdatum, mit Rückfall
+  // auf das Import-Datum. Vorher lief der Filter allein gegen created_at – bei
+  // einem Massenimport teilen hunderte Dokumente dieselbe Import-Minute, der
+  // Filter war damit alles-oder-nichts und als Navigation unbrauchbar.
+  if (opts.dateFrom) {
+    conditions.push(
+      sql`coalesce(${documents.published_at}, ${documents.created_at}) >= ${opts.dateFrom}`,
+    );
+  }
+  if (opts.dateTo) {
+    conditions.push(
+      sql`coalesce(${documents.published_at}, ${documents.created_at}) <= ${opts.dateTo}`,
+    );
+  }
   // Themen-Filter (Ebene 1): Dokumente mit einem der Themen (Subquery auf Junction).
   if (opts.topicIds && opts.topicIds.length > 0) {
     conditions.push(

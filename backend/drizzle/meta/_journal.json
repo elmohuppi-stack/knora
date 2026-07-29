@@ -50,6 +50,13 @@
       "when": 1785323035521,
       "tag": "0006_owner_membership",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785350423234,
+      "tag": "0007_search_indexes",
+      "breakpoints": true
     }
   ]
 }

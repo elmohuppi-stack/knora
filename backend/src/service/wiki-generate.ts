@@ -24,11 +24,15 @@ import {
   WIKI_DEDUP_PROMPT,
   WIKI_INDEX_INTRO_PROMPT,
   WIKI_CHUNK_CITATION_PROMPT,
+  docKindOf,
   granularityGuidance,
+  pagePromptFor,
+  summaryPromptFor,
 } from "./wiki-prompts.ts";
 import * as wikiService from "./wiki.ts";
 import * as topicService from "./topic.ts";
 import { getActiveProvider, callLLM, callLLMJson } from "./llm.ts";
+import { glossarForPrompt } from "../scripts/lib/rki-glossar.ts";
 
 // ---------------------------------------------------------------------------
 // Typen
@@ -86,6 +90,33 @@ const WIKI_SUMMARY_ONLY_CHAPTERS = parseInt(
   process.env.WIKI_SUMMARY_ONLY_CHAPTERS || "25",
 );
 
+// Wie viele bestehende Themen-Slugs als Kontext in den Extraktions-Prompt
+// gehen. Ein Deckel ist unvermeidlich – bei mehreren tausend Seiten passt die
+// Liste nicht in einen Prompt. Die verlässliche Zusammenführung übernimmt
+// deshalb nicht das LLM, sondern der deterministische Abgleich in
+// resolveSlugAgainstExisting().
+const PREVIOUS_SLUGS_IN_PROMPT = parseInt(
+  process.env.WIKI_PREVIOUS_SLUGS || "300",
+);
+
+/**
+ * Normalisiert Slug-/Titel-/Alias-Text für den Abgleich: Kleinschreibung,
+ * Umlaute aufgelöst, alles Nicht-Alphanumerische zu Bindestrichen. So findet
+ * "Impfpflicht" auch die bestehende Seite "concept/impfpflicht", und
+ * "SARS-CoV-2" trifft "sars-cov-2".
+ */
+function normalizeKey(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/^(entity|concept)\//, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 // ---------------------------------------------------------------------------
 // Hauptfunktion
 // ---------------------------------------------------------------------------
@@ -127,6 +158,14 @@ export async function generateWikiArticles(
   const granularity = ws?.wiki_config?.extraction_granularity || "standard";
   const maxPages = ws?.wiki_config?.max_pages_per_ingest || 10;
 
+  // Dokumentart bestimmt die Prompts. Ein Sitzungsprotokoll braucht eine andere
+  // Textsorte als ein Video-Transkript (Chronologie und Sprecherzuordnung statt
+  // Lexikonartikel) – siehe wiki-prompts.ts.
+  const docKind = docKindOf(doc.source_metadata);
+  if (docKind !== "default") {
+    console.log(`[wiki-gen] 📄 Dokumentart: ${docKind} (eigene Prompts)`);
+  }
+
   // Wiki-Tiefe: "full" (alles, kein Deckel) | "capped" (Entity/Concept-Seiten,
   // gedeckelt + Auto-Summary bei sehr großen Docs) | "summary" (nur Kapitel-Artikel)
   // | "off" (kein Wiki – Dokument ist trotzdem via Chat/RAG durchsuchbar).
@@ -137,11 +176,30 @@ export async function generateWikiArticles(
     return null;
   }
 
-  // 4. Existierende Slugs laden (für Deduplizierung)
-  const existingPages = await wikiService.listPages(workspaceId, {
-    page_size: 500,
-  });
-  const existingSlugs = existingPages.pages.map((p) => p.slug);
+  // 4. Existierende Entity-/Concept-Seiten laden (für Deduplizierung).
+  //
+  // Bewusst schlank und UNBEGRENZT statt listPages({page_size: 500}):
+  //  - Das 500er-Fenster war nach updated_at sortiert und füllte sich in einem
+  //    großen Workspace mit `summary-<uuid>`-Slugs. Die sind als Linkziel
+  //    nutzlos und verdrängten die echten Themenseiten aus dem Prompt – das LHM
+  //    sah bestehende Slugs nicht mehr und erfand neue, sodass ein Thema
+  //    mehrere konkurrierende Seiten bekam statt einer wachsenden.
+  //  - Nur slug/title/aliases, kein content: das Fenster hat vorher bis zu 500
+  //    vollständige Artikel in den Heap geladen.
+  const existingTopicPages = await db
+    .select({
+      slug: wikiPages.slug,
+      title: wikiPages.title,
+      aliases: wikiPages.aliases,
+    })
+    .from(wikiPages)
+    .where(
+      and(
+        eq(wikiPages.workspace_id, workspaceId),
+        inArray(wikiPages.page_type, ["entity", "concept"]),
+      ),
+    );
+  const existingSlugs = existingTopicPages.map((p) => p.slug);
 
   // Dokument in Kapitel (~CHAPTER_CHARS) zerlegen, damit das GANZE Dokument
   // verarbeitet wird statt bei 32k Zeichen abgeschnitten. Kurze Dokumente ergeben
@@ -173,10 +231,49 @@ export async function generateWikiArticles(
 
   console.log(`[wiki-gen] 🎚️ Wiki-Tiefe: ${depth} (konfiguriert: ${wikiDepth})`);
 
-  const previousSlugs = existingPages.pages
-    .filter((p) => p.page_type === "entity" || p.page_type === "concept")
+  // Kontext für die Extraktion. Bei mehreren tausend Themenseiten passt die
+  // Liste nicht mehr in einen Prompt, deshalb ein Deckel – die eigentliche
+  // Zusammenführung übernimmt danach resolveSlugAgainstExisting() deterministisch,
+  // nicht das LLM.
+  const previousSlugs = existingTopicPages
+    .slice(0, PREVIOUS_SLUGS_IN_PROMPT)
     .map((p) => `[[${p.slug}|${p.title}]]`)
     .join("\n");
+
+  /**
+   * Ordnet einen vom LLM vorgeschlagenen Kandidaten einer bestehenden Seite zu.
+   *
+   * Nötig, weil der Prompt bei großen Wikis unmöglich alle bestehenden Slugs
+   * enthalten kann: das LLM würde für ein längst vorhandenes Thema einen neuen
+   * Slug erfinden und die Seite spalten. Der Abgleich läuft über normalisierten
+   * Slug, Titel und Aliase – kostet keine Tokens und ist reproduzierbar.
+   */
+  // Der Schlüssel trägt immer das Präfix mit: eine Entität darf nie mit einer
+  // Konzeptseite zusammengeführt werden (gleiche Regel wie im Dedup-Prompt).
+  const slugIndex = new Map<string, string>();
+  for (const p of existingTopicPages) {
+    const prefix = p.slug.startsWith("entity/") ? "entity" : "concept";
+    const add = (text: string) => {
+      const k = normalizeKey(text);
+      if (k) slugIndex.set(`${prefix}/${k}`, p.slug);
+    };
+    add(p.slug);
+    add(p.title);
+    for (const a of (p.aliases as string[] | null) ?? []) {
+      if (typeof a === "string" && a.trim()) add(a);
+    }
+  }
+  function resolveSlugAgainstExisting(item: ExtractedItem): string {
+    const prefix = item.slug.startsWith("entity/") ? "entity" : "concept";
+    const keys = [item.slug, item.name, ...(item.aliases || [])]
+      .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+      .map((t) => `${prefix}/${normalizeKey(t)}`);
+    for (const k of keys) {
+      const hit = slugIndex.get(k);
+      if (hit) return hit;
+    }
+    return item.slug;
+  }
 
   // =========================================================================
   // SCHRITT 1: Kandidaten extrahieren (Entities + Concepts) – über ALLE Kapitel
@@ -184,6 +281,7 @@ export async function generateWikiArticles(
   // nötig; spart bei großen Dokumenten die teuersten Zusatz-Calls).
   // =========================================================================
   const candidateMap = new Map<string, ExtractedItem>();
+  let reusedSlugs = 0;
   if (generatePages) {
     console.log(
       `[wiki-gen] 🔍 Schritt 1: Extrahiere Kandidaten aus ${chapters.length} Kapitel(n)...`,
@@ -201,11 +299,21 @@ export async function generateWikiArticles(
         ...(extractionJson.entities || []),
         ...(extractionJson.concepts || []),
       ]) {
+        // Vor dem Zusammenführen auf eine bestehende Seite umbiegen, falls es
+        // sie schon gibt. Ohne diesen Schritt hängt die Zusammenführung daran,
+        // dass der Prompt alle bestehenden Slugs enthält – was bei mehreren
+        // tausend Seiten nicht mehr möglich ist.
+        const resolved = resolveSlugAgainstExisting(it);
+        if (resolved !== it.slug) {
+          reusedSlugs++;
+          it.slug = resolved;
+        }
         mergeCandidate(candidateMap, it);
       }
     }
     console.log(
-      `[wiki-gen] ✅ ${candidateMap.size} Kandidaten (dedupliziert über alle Kapitel)`,
+      `[wiki-gen] ✅ ${candidateMap.size} Kandidaten (dedupliziert über alle Kapitel)` +
+        (reusedSlugs > 0 ? `, ${reusedSlugs}× auf bestehende Seite umgebogen` : ""),
     );
   } else {
     console.log(`[wiki-gen] ⏭️ Schritt 1 übersprungen (Summary-Modus)`);
@@ -227,14 +335,23 @@ export async function generateWikiArticles(
   const chapterSlugs: string[] = [];
   const chapterLinks: string[] = [];
   let summaryPage: any = null;
+  let protocolFlags: { flags: string[]; quotes: string[] } | null = null;
 
   for (let i = 0; i < chapters.length; i++) {
     const chapter = chapters[i];
     const summaryRaw = await callLLM(
       provider,
-      WIKI_SUMMARY_PROMPT.replace("{{content}}", chapter.text)
-        .replace("{{language}}", language)
-        .replace("{{extractedSlugs}}", extractedSlugsText || "Keine"),
+      summaryPromptFor(docKind)
+        .replace("{{content}}", chapter.text)
+        .replace(/\{\{language\}\}/g, language)
+        .replace(/\{\{sessionLabel\}\}/g, doc.title)
+        .replace("{{extractedSlugs}}", extractedSlugsText || "Keine")
+        // Nur geprüfte Auflösungen. Kürzel, die nicht in dieser Liste stehen,
+        // darf das Modell laut Prompt nicht auflösen – siehe rki-glossar.ts.
+        .replace(
+          "{{glossar}}",
+          docKind === "meeting_protocol" ? glossarForPrompt() : "Keines",
+        ),
     );
     if (!summaryRaw) {
       console.log(`[wiki-gen] ⚠️ Kapitel ${i + 1}: Summary fehlgeschlagen`);
@@ -243,7 +360,37 @@ export async function generateWikiArticles(
 
     const sumMatch = summaryRaw.match(/SUMMARY:\s*(.+)/im);
     const summaryLine = sumMatch ? sumMatch[1].trim() : "";
-    const body = summaryRaw.replace(/SUMMARY:\s*.+(\r?\n|$)/i, "").trim();
+    let body = summaryRaw.replace(/SUMMARY:\s*.+(\r?\n|$)/i, "").trim();
+
+    // Brisanz-Marker aus der FLAGS-Zeile lösen und aus dem Artikeltext
+    // entfernen – sie gehören in page_metadata, nicht in den Fließtext.
+    // Absichtlich ohne Zeilenende-Anker und ohne Positionsannahme: die Zeile
+    // soll laut Prompt an zweiter Stelle stehen, Modelle setzen sie aber
+    // gelegentlich woanders hin, und ein zu strenges Muster verwirft sie dann
+    // stillschweigend.
+    const flagsMatch = body.match(/FLAGS:\s*(\{[\s\S]*?\})/);
+    if (flagsMatch) {
+      body = body.replace(flagsMatch[0], "").trim();
+      try {
+        const parsed = JSON.parse(flagsMatch[1]);
+        const flags = Array.isArray(parsed.flags)
+          ? parsed.flags.filter((f: unknown) => typeof f === "string")
+          : [];
+        const quotes = Array.isArray(parsed.quotes)
+          ? parsed.quotes.filter((q: unknown) => typeof q === "string").slice(0, 3)
+          : [];
+        protocolFlags = { flags, quotes };
+      } catch {
+        console.log(`[wiki-gen] ⚠️ FLAGS-Block nicht lesbar, wird ignoriert`);
+      }
+    } else if (docKind === "meeting_protocol") {
+      // Sichtbar machen statt schlucken: ohne Marker fehlt das Dokument später
+      // in der Auffälligkeiten-Facette, und das wäre ohne Hinweis nicht zu
+      // erklären.
+      console.log(
+        `[wiki-gen] ⚠️ Keine FLAGS-Zeile in der Antwort – Auffälligkeiten fehlen für dieses Protokoll`,
+      );
+    }
     // Titel-Priorität: echte Dokument-Überschrift → vom LLM generierter Artikel-
     // titel (# …) → generischer Fallback. So bekommen auch PDFs ohne Markdown-
     // Überschriften aussagekräftige Kapitel-Titel statt "Kapitel N".
@@ -251,14 +398,26 @@ export async function generateWikiArticles(
     // umgedreht: „Transkript (Teil 3)" sagt nichts, der Artikel-Titel schon.
     const titleMatch = body.match(/^#\s+(.+)/m);
     const llmTitle = titleMatch ? titleMatch[1].trim() : "";
+    // Bei Sitzungsprotokollen ist der Titel eine Tatsache, keine Formulierung:
+    // "2020-03-04 · Krisenstab" kommt aus dem Dokument, nicht aus der
+    // LLM-Antwort. Datum zuerst heißt, dass alphabetisch sortieren
+    // chronologisch sortiert und Abschneiden in der UI das Datum nie frisst.
     let chapterTitle =
-      (chapter.titleIsFallback
-        ? llmTitle || chapter.title
-        : chapter.title || llmTitle) ||
-      (multiChapter ? `${doc.title} – Teil ${i + 1}` : doc.title);
+      docKind === "meeting_protocol"
+        ? multiChapter
+          ? `${doc.title} – Teil ${i + 1}`
+          : doc.title
+        : (chapter.titleIsFallback
+            ? llmTitle || chapter.title
+            : chapter.title || llmTitle) ||
+          (multiChapter ? `${doc.title} – Teil ${i + 1}` : doc.title);
     // Kein Kapitel darf denselben Titel wie die Übersichtsseite tragen – sonst
     // steht der Dokumenttitel doppelt in der Navigation.
-    if (multiChapter && sameTitle(chapterTitle, doc.title)) {
+    if (
+      docKind !== "meeting_protocol" &&
+      multiChapter &&
+      sameTitle(chapterTitle, doc.title)
+    ) {
       chapterTitle =
         llmTitle && !sameTitle(llmTitle, doc.title)
           ? llmTitle
@@ -304,6 +463,28 @@ export async function generateWikiArticles(
       parent_slug: null,
       sort_order: 0,
     });
+  }
+
+  // Brisanz-Marker auf der Artikelseite ablegen. page_metadata wurde von dieser
+  // Pipeline bisher nie beschrieben; die Marker machen aus "irgendwo in 378
+  // Protokollen" eine filterbare Liste auffälliger Sitzungen.
+  if (protocolFlags && summaryPage) {
+    const existingMeta = (summaryPage.page_metadata ?? {}) as Record<string, unknown>;
+    await db
+      .update(wikiPages)
+      .set({
+        page_metadata: {
+          ...existingMeta,
+          flags: protocolFlags.flags,
+          flag_quotes: protocolFlags.quotes,
+          session_date: (doc.source_metadata as any)?.session_date ?? null,
+          committee: (doc.source_metadata as any)?.committee ?? null,
+        },
+      })
+      .where(eq(wikiPages.id, summaryPage.id));
+    console.log(
+      `[wiki-gen] 🚩 Auffälligkeiten: ${protocolFlags.flags.join(", ") || "keine"}`,
+    );
   }
 
   // =========================================================================
@@ -430,6 +611,8 @@ export async function generateWikiArticles(
       newInformation: newInfo,
       language,
       availableSlugs: existingSlugs,
+      docKind,
+      sessionLabel: doc.title,
     });
     const raw = await callLLM(provider, pagePrompt);
     if (!raw) continue;
@@ -480,9 +663,21 @@ export async function generateWikiArticles(
   // ihr Inhalt ist ein kontrolliertes Inhaltsverzeichnis, keine Fließtext-Seite.
   const affectedSlugs = [...chapterSlugs, ...toProcess.map((e) => e.slug)];
 
-  // Gültige Ziel-Slugs (für Dead-Link-Bereinigung) einmalig laden
-  const allPages = await wikiService.listPages(workspaceId, { page_size: 1000 });
-  const validSlugSet = new Set(allPages.pages.map((p) => p.slug));
+  // Gültige Ziel-Slugs (für Dead-Link-Bereinigung) einmalig laden.
+  // Bewusst eine schlanke, UNBEGRENZTE Slug-Abfrage statt listPages({page_size:
+  // 1000}): stripDeadLinks entfernt jeden [[Link]], dessen Ziel nicht in diesem
+  // Set steht. Mit einem Fenster von 1000 Seiten löscht die Bereinigung in einem
+  // größeren Wiki gültige Links – Datenverlust, der mit jedem Lauf wächst.
+  // Nebeneffekt: listPages selektiert alle Spalten inkl. content, hier also
+  // vorher bis zu 1000 vollständige Artikel im Heap.
+  const validSlugSet = new Set(
+    (
+      await db
+        .select({ slug: wikiPages.slug })
+        .from(wikiPages)
+        .where(eq(wikiPages.workspace_id, workspaceId))
+    ).map((r) => r.slug),
+  );
 
   // Für jede betroffene Seite: Links von anderen Seiten einfügen + tote Links entfernen
   for (const slug of affectedSlugs) {
@@ -523,13 +718,22 @@ export async function generateWikiArticles(
 
   // Neu erzeugte Wiki-Chunks embedden, damit sie in der Vektorsuche (Chat-RAG)
   // auffindbar sind (nicht-blockierend – hält den Wiki-Gen-Response nicht auf).
-  import("./embedding.ts")
-    .then(({ embedWorkspaceChunks }) =>
-      embedWorkspaceChunks(workspaceId).then((r) =>
-        console.log(`[wiki-gen] 🧠 ${r.processed} Wiki-Chunks embedded`),
-      ),
-    )
-    .catch((e) => console.warn(`[wiki-gen] Embedding-Trigger fehlgeschlagen:`, e));
+  //
+  // Mit WIKI_EMBED_AFTER_GENERATE=0 abschaltbar, und das ist bei Massenläufen
+  // zwingend: embedWorkspaceChunks arbeitet workspace-weit, nicht
+  // dokumentbezogen. Bei hunderten Aufrufen laufen entsprechend viele Sweeps
+  // gleichzeitig über dieselben Zeilen (kein FOR UPDATE SKIP LOCKED), embedden
+  // Chunks doppelt und belegen dabei den DB-Pool. Stattdessen einmal
+  // embed-backfill.ts am Ende des Laufs.
+  if (process.env.WIKI_EMBED_AFTER_GENERATE !== "0") {
+    import("./embedding.ts")
+      .then(({ embedWorkspaceChunks }) =>
+        embedWorkspaceChunks(workspaceId).then((r) =>
+          console.log(`[wiki-gen] 🧠 ${r.processed} Wiki-Chunks embedded`),
+        ),
+      )
+      .catch((e) => console.warn(`[wiki-gen] Embedding-Trigger fehlgeschlagen:`, e));
+  }
 
   // Auto-Themen-Klassifikation (Ebene 1): nur wenn der Workspace Themen hat und
   // das Dokument noch keine zugeordneten (überschreibt keine Handedits). Robust –
@@ -764,18 +968,29 @@ function buildPagePrompt(opts: {
   newInformation: string;
   language: string;
   availableSlugs: string[];
+  docKind?: "meeting_protocol" | "default";
+  sessionLabel?: string;
 }): string {
-  const { item, existingContent, newInformation, language, availableSlugs } =
-    opts;
+  const {
+    item,
+    existingContent,
+    newInformation,
+    language,
+    availableSlugs,
+    docKind = "default",
+    sessionLabel = "",
+  } = opts;
   const pageType = item.slug.startsWith("entity/") ? "Entität" : "Konzept";
   const validLinks = [...new Set(availableSlugs)]
     .filter((s) => s !== item.slug) // Seite verlinkt nicht auf sich selbst
     .map((s) => `[[${s}]]`)
     .join("\n");
 
-  return WIKI_PAGE_MODIFY_PROMPT.replace(/\{\{pageSlug\}\}/g, item.slug)
+  return pagePromptFor(docKind)
+    .replace(/\{\{pageSlug\}\}/g, item.slug)
     .replace(/\{\{pageTitle\}\}/g, item.name)
     .replace(/\{\{pageType\}\}/g, pageType)
+    .replace(/\{\{sessionLabel\}\}/g, sessionLabel)
     .replace("{{pageAliases}}", (item.aliases || []).join(", "))
     .replace("{{existingContent}}", existingContent)
     .replace("{{availableSlugs}}", validLinks || "Keine")

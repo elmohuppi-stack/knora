@@ -63,13 +63,38 @@ wikiRouter.get("/:workspaceId/pages", async (c) => {
     dateTo: parseDate(q.to),
     topicIds: q.topics ? q.topics.split(",").filter(Boolean) : undefined,
     references: q.references || undefined,
+    flags: q.flags ? q.flags.split(",").filter(Boolean) : undefined,
     sort: WIKI_SORTS.includes(q.sort as WikiSortT)
       ? (q.sort as WikiSortT)
       : undefined,
-    page: parseInt(q.page || "1"),
-    page_size: q.page_size ? parseInt(q.page_size) : undefined,
+    // NaN-sicher: ?page=abc ergab vorher offset NaN und damit einen DB-Fehler.
+    page: Math.max(1, parseInt(q.page || "1") || 1),
+    page_size: q.page_size ? parseInt(q.page_size) || undefined : undefined,
   });
   return c.json(result);
+});
+
+/**
+ * Zeitleiste: Treffer je Monat, gruppiert über das Sitzungsdatum.
+ *
+ * Macht aus mehreren hundert flachen Karten eine navigierbare Struktur. Ohne das
+ * gibt es keinen Weg, einen Zeitraum anzusteuern – der Datumsfilter allein
+ * verlangt, dass man den gesuchten Zeitraum schon kennt.
+ */
+wikiRouter.get("/:workspaceId/facets/months", async (c) => {
+  const workspaceId = c.req.param("workspaceId");
+  const q = c.req.query();
+  const months = await wikiService.monthFacets(workspaceId, {
+    page_type: q.page_type || undefined,
+    channel: q.channel || undefined,
+  });
+  return c.json({ months });
+});
+
+/** Auffälligkeiten: Treffer je Marker aus page_metadata.flags. */
+wikiRouter.get("/:workspaceId/facets/flags", async (c) => {
+  const flags = await wikiService.flagFacets(c.req.param("workspaceId"));
+  return c.json({ flags });
 });
 
 // Graph-Daten (Fokus-Subgraph oder Top-Konzepte-Wolke)

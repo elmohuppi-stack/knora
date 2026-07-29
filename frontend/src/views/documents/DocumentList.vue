@@ -112,14 +112,14 @@
         showButtonBar
         iconDisplay="input"
         dateFormat="dd.mm.yy"
-        placeholder="Zeitraum (Import-Datum)"
+        placeholder="Zeitraum (Sitzungsdatum)"
         class="filter-datepicker"
       />
       <select v-model="sortBy" @change="loadDocs">
         <option value="created_desc">Neueste zuerst</option>
         <option value="created_asc">Älteste zuerst</option>
-        <option value="published_desc">Video-Datum ↓</option>
-        <option value="published_asc">Video-Datum ↑</option>
+        <option value="published_desc">Sitzungsdatum ↓</option>
+        <option value="published_asc">Sitzungsdatum ↑</option>
         <option value="title_asc">Titel A–Z</option>
         <option value="title_desc">Titel Z–A</option>
       </select>
@@ -183,7 +183,15 @@
                 statusLabel(doc.parse_status)
               }}</span>
             </td>
-            <td class="date">{{ formatDate(doc.created_at) }}</td>
+            <!-- Sitzungs-/Veröffentlichungsdatum, sonst Import-Datum. Bei einem
+                 Massenimport tragen alle Zeilen dieselbe Import-Minute und die
+                 Spalte wäre wertlos. -->
+            <td
+              class="date"
+              :title="doc.published_at ? 'Sitzungsdatum' : 'Import-Datum'"
+            >
+              {{ formatDate(doc.published_at || doc.created_at) }}
+            </td>
             <td>
               <button
                 class="btn-icon-sm"

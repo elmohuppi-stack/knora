@@ -17,6 +17,9 @@ import {
 import type { DocumentSort } from "../service/document.ts";
 import { logActivity, updateLog } from "../service/activity-log.ts";
 import * as topicService from "../service/topic.ts";
+import { db } from "../db/index.ts";
+import { workspaces } from "../db/schema.ts";
+import { eq } from "drizzle-orm";
 
 const documentRouter = new Hono();
 documentRouter.use("*", authMiddleware);
@@ -482,7 +485,25 @@ async function scheduleChunking(
       return;
     }
 
-    const chunkList = documentService.splitIntoChunks(text);
+    // Chunkgröße aus dem Workspace übernehmen. Vorher wurde splitIntoChunks
+    // ohne Argumente aufgerufen, wodurch workspaces.chunk_size/chunk_overlap
+    // für Dokumente wirkungslos waren (immer 512/50) – in einem Workspace mit
+    // größer gechunkten Dokumenten hätte ein UI-Upload sonst eine abweichende
+    // Chunk-Größe und damit einen inkonsistenten Vektorindex.
+    const [ws] = await db
+      .select({
+        chunk_size: workspaces.chunk_size,
+        chunk_overlap: workspaces.chunk_overlap,
+      })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+
+    const chunkList = documentService.splitIntoChunks(
+      text,
+      ws?.chunk_size ?? 512,
+      ws?.chunk_overlap ?? 50,
+    );
     if (chunkList.length > 0) {
       await documentService.saveChunks(docId, workspaceId, chunkList);
     }

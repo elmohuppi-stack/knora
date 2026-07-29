@@ -14,6 +14,7 @@ import {
   and,
   like,
   or,
+  ilike,
   desc,
   asc,
   gte,
@@ -23,6 +24,12 @@ import {
   getTableColumns,
 } from "drizzle-orm";
 import { splitIntoChunks, saveChunks } from "./document.ts";
+
+/**
+ * Obergrenze für page_size. Vorher unbegrenzt – ein page_size=100000 hätte den
+ * gesamten Wiki-Inhalt inklusive aller content-Spalten in eine Antwort geladen.
+ */
+const MAX_PAGE_SIZE = 200;
 
 // --- Wiki-Chunk-Sync (für Chat-Suche) ---
 
@@ -111,13 +118,17 @@ export async function listPages(
     topicIds?: string[];
     // Ebene 3: nur Seiten, deren out_links diesen Slug enthalten (Backlink-Filter).
     references?: string;
+    // Ebene 4: Auffälligkeiten aus page_metadata.flags (OR-Semantik).
+    flags?: string[];
     sort?: WikiSort;
     page?: number;
     page_size?: number;
   },
 ) {
-  const page = options?.page || 1;
-  const pageSize = options?.page_size || 50;
+  const page = Math.max(1, options?.page || 1);
+  // Obergrenze: page_size war unbegrenzt, ein page_size=100000 hätte den
+  // gesamten Wiki-Inhalt inkl. content in eine Antwort geladen.
+  const pageSize = Math.min(Math.max(1, options?.page_size || 50), MAX_PAGE_SIZE);
 
   let conditions = eq(wikiPages.workspace_id, workspaceId);
 
@@ -130,11 +141,19 @@ export async function listPages(
     conditions = and(conditions, eq(wikiPages.status, options.status))!;
   }
   if (options?.query) {
+    // Deutsche Volltextsuche statt LIKE: `like` ist case-sensitive (die Suche
+    // nach "masken" fand "Masken" nicht), ohne Wortstamm-Erkennung und ohne
+    // Index. to_tsvector('german', …) findet auch Beugungen und nutzt den
+    // GIN-Index aus Migration 0007.
+    //
+    // Der LIKE-Zweig bleibt als ODER daneben: websearch_to_tsquery findet keine
+    // Teilwörter, und Kürzel wie "FG36" oder Slug-Fragmente sucht man genau so.
+    const q = options.query.trim();
     conditions = and(
       conditions,
       or(
-        like(wikiPages.title, `%${options.query}%`),
-        like(wikiPages.content, `%${options.query}%`),
+        sql`to_tsvector('german', coalesce(${wikiPages.title}, '') || ' ' || coalesce(${wikiPages.content}, '')) @@ websearch_to_tsquery('german', ${q})`,
+        ilike(wikiPages.title, `%${q}%`),
       ),
     )!;
   }
@@ -147,11 +166,33 @@ export async function listPages(
   if (options?.channel) {
     conditions = and(conditions, eq(documents.channel, options.channel))!;
   }
+  // Zeitraum: auf das Sitzungs-/Veröffentlichungsdatum, nicht auf den Import.
+  // Vorher lief der Filter gegen created_at – bei einem Massenimport teilen
+  // hunderte Dokumente dieselbe Import-Minute, der Filter war damit
+  // alles-oder-nichts und als Navigation über einen Zeitraum unbrauchbar.
+  // coalesce() hält Altbestand ohne published_at weiterhin filterbar.
   if (options?.dateFrom) {
-    conditions = and(conditions, gte(documents.created_at, options.dateFrom))!;
+    conditions = and(
+      conditions,
+      sql`coalesce(${documents.published_at}, ${documents.created_at}) >= ${options.dateFrom}`,
+    )!;
   }
   if (options?.dateTo) {
-    conditions = and(conditions, lte(documents.created_at, options.dateTo))!;
+    conditions = and(
+      conditions,
+      sql`coalesce(${documents.published_at}, ${documents.created_at}) <= ${options.dateTo}`,
+    )!;
+  }
+  // Ebene 4: Auffälligkeiten – Seiten, deren page_metadata.flags einen der
+  // gesuchten Marker enthält (OR-Semantik). Bewusst ein @>-Vergleich je Marker
+  // statt ?| mit zusammengebautem Array: so ist jeder Wert ein echter
+  // Query-Parameter und nicht in SQL hineininterpoliert.
+  if (options?.flags && options.flags.length > 0) {
+    const flagConds = options.flags.map(
+      (f) =>
+        sql`${wikiPages.page_metadata} -> 'flags' @> ${JSON.stringify([f])}::jsonb`,
+    );
+    conditions = and(conditions, or(...flagConds))!;
   }
   // Backlink-Filter (Ebene 3): Seiten, deren out_links den Slug enthalten.
   if (options?.references) {
@@ -204,6 +245,12 @@ export async function listPages(
       ...getTableColumns(wikiPages),
       document_title: documents.title,
       document_type: documents.type,
+      // Sitzungs-/Veröffentlichungsdatum und Kanal mitliefern: die Karten
+      // zeigten bisher updated_at der Wiki-Seite, also den Zeitpunkt der
+      // Generierung. Bei einem Bestand aus datierten Dokumenten ist das die
+      // unwichtigste aller Datumsangaben.
+      document_published_at: documents.published_at,
+      document_channel: documents.channel,
     })
     .from(wikiPages)
     .leftJoin(documents, eq(wikiPages.source_document_id, documents.id))
@@ -332,6 +379,70 @@ export async function getGraph(
   }
 
   return { focus: focus.slug, nodes: rows.map(toNode), edges };
+}
+
+/**
+ * Treffer je Monat über das Sitzungs-/Veröffentlichungsdatum des Quell-Dokuments.
+ *
+ * Grundlage der Zeitleisten-Facette: aus einer flachen Liste von mehreren
+ * hundert Artikeln werden damit ~40 navigierbare Bündel. coalesce() hält
+ * Altbestand ohne published_at sichtbar (dann zählt das Import-Datum).
+ */
+export async function monthFacets(
+  workspaceId: string,
+  opts?: { page_type?: string; channel?: string },
+): Promise<{ month: string; count: number }[]> {
+  const conds = [
+    sql`${wikiPages.workspace_id} = ${workspaceId}`,
+    sql`${wikiPages.status} <> 'draft'`,
+    sql`${wikiPages.source_document_id} is not null`,
+  ];
+  if (opts?.page_type) {
+    conds.push(sql`${wikiPages.page_type} = ${opts.page_type}`);
+  }
+  if (opts?.channel) {
+    conds.push(sql`${documents.channel} = ${opts.channel}`);
+  }
+
+  const rows = await db
+    .select({
+      month: sql<string>`to_char(date_trunc('month', coalesce(${documents.published_at}, ${documents.created_at})), 'YYYY-MM')`,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(wikiPages)
+    .innerJoin(documents, eq(wikiPages.source_document_id, documents.id))
+    .where(and(...conds))
+    .groupBy(
+      sql`date_trunc('month', coalesce(${documents.published_at}, ${documents.created_at}))`,
+    )
+    .orderBy(
+      sql`date_trunc('month', coalesce(${documents.published_at}, ${documents.created_at})) asc`,
+    );
+
+  return rows.filter((r) => r.month);
+}
+
+/**
+ * Treffer je Auffälligkeits-Marker aus page_metadata.flags.
+ * jsonb_array_elements_text entfaltet das Array, damit gezählt werden kann.
+ */
+export async function flagFacets(
+  workspaceId: string,
+): Promise<{ flag: string; count: number }[]> {
+  const rows = await db.execute(sql`
+    select f.flag, count(*)::int as count
+    from ${wikiPages} w
+    cross join lateral jsonb_array_elements_text(w.page_metadata -> 'flags') as f(flag)
+    where w.workspace_id = ${workspaceId}
+      and w.status <> 'draft'
+      and jsonb_typeof(w.page_metadata -> 'flags') = 'array'
+    group by f.flag
+    order by count(*) desc, f.flag asc
+  `);
+  return (rows.rows ?? rows ?? []).map((r: any) => ({
+    flag: String(r.flag),
+    count: Number(r.count),
+  }));
 }
 
 export async function getPage(workspaceId: string, slug: string) {

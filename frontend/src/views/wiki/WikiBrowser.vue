@@ -41,6 +41,51 @@
           </div>
         </div>
 
+        <!-- Zeitleiste: Jahr → Monat mit Trefferzahlen. Der wichtigste Zugang
+             bei datierten Beständen – der Datumsfilter allein setzt voraus,
+             dass man den gesuchten Zeitraum schon kennt. -->
+        <div class="facet-group" v-if="monthsByYear.length">
+          <div class="facet-label">Zeitleiste</div>
+          <div class="timeline">
+            <div v-for="y in monthsByYear" :key="y.year" class="tl-year">
+              <button class="tl-year-head" @click="openYears[y.year] = !openYears[y.year]">
+                <span>{{ openYears[y.year] ? "▾" : "▸" }} {{ y.year }}</span>
+                <span class="cnt">{{ y.total }}</span>
+              </button>
+              <div v-show="openYears[y.year]" class="tl-months">
+                <button
+                  v-for="m in y.months"
+                  :key="m.month"
+                  class="tl-month"
+                  :title="`${m.count} Treffer in ${m.month}`"
+                  @click="selectMonth(m.month)"
+                >
+                  <span>{{ m.label }}</span>
+                  <span class="cnt">{{ m.count }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Auffälligkeiten: der direkte Weg zu den brisanten Sitzungen,
+             statt sie im Bestand suchen zu müssen. -->
+        <div class="facet-group" v-if="flagFacets.length">
+          <div class="facet-label">Auffälligkeiten</div>
+          <div class="topic-facets">
+            <button
+              v-for="f in flagFacets"
+              :key="f.flag"
+              :class="['topic-facet', { active: filterFlags.includes(f.flag) }]"
+              @click="toggleFlagFilter(f.flag)"
+              :title="`${f.count} Artikel mit diesem Marker`"
+            >
+              <span>{{ flagLabel(f.flag) }}</span>
+              <span class="cnt">{{ f.count }}</span>
+            </button>
+          </div>
+        </div>
+
         <div class="facet-group" v-if="allTopics.length">
           <div class="facet-label">Themen</div>
           <div class="topic-facets">
@@ -81,7 +126,7 @@
         </div>
 
         <div class="facet-group">
-          <div class="facet-label">Zeitraum (Import-Datum)</div>
+          <div class="facet-label">Zeitraum (Sitzungsdatum)</div>
           <DatePicker
             v-model="filterDates"
             selectionMode="range"
@@ -100,8 +145,8 @@
           <select v-model="sortBy" @change="applyFilters" class="facet-select">
             <option value="updated_desc">Zuletzt aktualisiert</option>
             <option value="updated_asc">Älteste zuerst</option>
-            <option value="published_desc">Video-Datum ↓</option>
-            <option value="published_asc">Video-Datum ↑</option>
+            <option value="published_desc">Sitzungsdatum ↓</option>
+            <option value="published_asc">Sitzungsdatum ↑</option>
             <option value="title_asc">Titel A–Z</option>
             <option value="title_desc">Titel Z–A</option>
             <option value="connections_desc">Meiste Verknüpfungen</option>
@@ -267,12 +312,35 @@
               </template>
             </p>
             <p class="card-summary">{{ stripWikiLinks(p.summary) }}</p>
+            <!-- Auffälligkeiten aus page_metadata.flags – der schnellste Weg zu
+                 den brisanten Sitzungen. -->
+            <div v-if="pageFlags(p).length" class="card-flags">
+              <span v-for="f in pageFlags(p)" :key="f" class="flag-chip">
+                {{ flagLabel(f) }}
+              </span>
+            </div>
             <div class="card-meta">
-              <span>{{ formatDate(p.updated_at) }}</span>
+              <!-- Sitzungsdatum, nicht das Bearbeitungsdatum der Wiki-Seite:
+                   bei generierten Artikeln ist updated_at der Zeitpunkt der
+                   Generierung und damit die unwichtigste Datumsangabe. -->
+              <span :title="sessionDate(p) ? 'Sitzungsdatum' : 'Zuletzt bearbeitet'">
+                {{ sessionDate(p) || formatDate(p.updated_at) }}
+              </span>
+              <span v-if="p.document_channel" class="card-channel">{{
+                p.document_channel
+              }}</span>
               <span v-if="p.out_links?.length">{{ p.out_links.length }} →</span>
               <span v-if="p.in_links?.length">{{ p.in_links.length }} ←</span>
             </div>
           </article>
+        </div>
+
+        <!-- Nachladen: die Liste war auf 200 Treffer begrenzt und alles darüber
+             hinaus unerreichbar – bei einigen hundert Protokollen die Hälfte. -->
+        <div v-if="!loading && pages.length < total" class="load-more">
+          <button class="btn-more" :disabled="loadingMore" @click="loadMore">
+            {{ loadingMore ? "lädt …" : `Weitere ${Math.min(pageSize, total - pages.length)} von ${total} laden` }}
+          </button>
         </div>
       </template>
 
@@ -340,6 +408,24 @@
           :article="selectedPage"
           :article-key="selectedSlug"
         />
+
+        <!-- Inhaltsverzeichnis: Sitzungsartikel sind lang, ohne Sprungmarken
+             muss man Kopfdaten, Lagebild, alle TOPs, Beschlüsse und
+             Kontroversen durchscrollen. Erst ab 3 Überschriften sinnvoll. -->
+        <nav v-if="!editing && tocEntries.length > 2" class="reader-toc">
+          <button class="toc-head" @click="tocOpen = !tocOpen">
+            {{ tocOpen ? "▾" : "▸" }} Inhalt ({{ tocEntries.length }})
+          </button>
+          <ul v-show="tocOpen" class="toc-list">
+            <li
+              v-for="e in tocEntries"
+              :key="e.id"
+              :class="['toc-item', `toc-l${e.level}`]"
+            >
+              <a href="javascript:void(0)" @click="scrollToHeading(e.id)">{{ e.text }}</a>
+            </li>
+          </ul>
+        </nav>
 
         <div
           v-if="!editing"
@@ -542,6 +628,8 @@ import { useWorkspace } from "../../composables/useWorkspace";
 import DatePicker from "primevue/datepicker";
 import SpeechBar from "../../components/SpeechBar.vue";
 import axios from "axios";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -577,9 +665,20 @@ const syncMobile = () => {
   isMobile.value = mobileMq?.matches ?? false;
 };
 
+// Ebene 4: Auffälligkeiten-Filter (page_metadata.flags)
+const filterFlags = ref<string[]>([]);
+const flagFacets = ref<{ flag: string; count: number }[]>([]);
+// Zeitleiste (Jahr → Monat) mit Trefferzahlen
+const monthFacets = ref<{ month: string; count: number }[]>([]);
+const openYears = ref<Record<string, boolean>>({});
+
 const pages = ref<any[]>([]);
 const total = ref(0);
 const loading = ref(false);
+// Blätterung: serverseitig auf 200 begrenzt, deshalb hier dieselbe Seitengröße.
+const pageSize = 100;
+const currentPage = ref(1);
+const loadingMore = ref(false);
 const tabs = ref<{ type: string; label: string; total: number }[]>([
   { type: "summary", label: "Summaries", total: 0 },
   { type: "entity", label: "Entities", total: 0 },
@@ -590,6 +689,9 @@ const tabs = ref<{ type: string; label: string; total: number }[]>([
 const selectedPage = ref<any>(null);
 const selectedSlug = ref("");
 // Ebene 4: Bearbeiten + Historie
+// Inhaltsverzeichnis standardmäßig zu: bei kurzen Artikeln stört es, bei langen
+// ist es einen Klick entfernt.
+const tocOpen = ref(false);
 const editing = ref(false);
 const editTitle = ref("");
 const editSummary = ref("");
@@ -777,6 +879,8 @@ onMounted(async () => {
       loadChannels(),
       loadTopics(),
       loadTopConcepts(),
+      loadMonthFacets(),
+      loadFlagFacets(),
       loadDraftClusters(),
     ]);
     await loadPages();
@@ -801,6 +905,8 @@ watch(workspaceId, () => {
   loadIndex();
   loadStats();
   loadChannels();
+  loadMonthFacets();
+  loadFlagFacets();
   loadPages();
 });
 
@@ -913,25 +1019,65 @@ async function loadTopConcepts() {
   }
 }
 
+/** Query-Parameter der aktuellen Filterlage (ohne Seitennummer). */
+function currentFilterParams(): Record<string, string> {
+  const params: Record<string, string> = {
+    page_type: activeTab.value,
+    page_size: String(pageSize),
+    sort: sortBy.value,
+  };
+  if (searchQuery.value) params.query = searchQuery.value;
+  if (filterChannel.value) params.channel = filterChannel.value;
+  if (filterTopicIds.value.length)
+    params.topics = filterTopicIds.value.join(",");
+  if (filterReferences.value) params.references = filterReferences.value;
+  if (filterFlags.value.length) params.flags = filterFlags.value.join(",");
+  const [from, to] = filterDates.value || [];
+  if (from) params.from = `${toDateStr(from)}T00:00:00`;
+  if (to) params.to = `${toDateStr(to)}T23:59:59`;
+  return params;
+}
+
+/** Zeitleiste laden. Auf den aktiven Typ eingeschränkt, damit die Zahlen zur
+ *  Ergebnisliste passen (Entity-/Concept-Seiten hängen am erstgenerierenden
+ *  Dokument und würden die Monatszahlen sonst verzerren). */
+async function loadMonthFacets() {
+  if (!workspaceId.value) return;
+  try {
+    const res = await axios.get(
+      `/api/v1/wiki/${workspaceId.value}/facets/months`,
+      { params: { page_type: activeTab.value } },
+    );
+    monthFacets.value = res.data.months || [];
+    // Das jüngste Jahr aufgeklappt lassen – dort liegt meist der Einstieg.
+    const years = [...new Set(monthFacets.value.map((m: any) => m.month.slice(0, 4)))];
+    if (years.length && Object.keys(openYears.value).length === 0) {
+      openYears.value = { [years[years.length - 1]]: true };
+    }
+  } catch {
+    /* Facette ist optional – ein Fehler darf die Ansicht nicht blockieren */
+  }
+}
+
+async function loadFlagFacets() {
+  if (!workspaceId.value) return;
+  try {
+    const res = await axios.get(
+      `/api/v1/wiki/${workspaceId.value}/facets/flags`,
+    );
+    flagFacets.value = res.data.flags || [];
+  } catch {
+    /* optional */
+  }
+}
+
 async function loadPages() {
   if (!workspaceId.value) return;
   loading.value = true;
+  currentPage.value = 1;
   try {
-    const params: Record<string, string> = {
-      page_type: activeTab.value,
-      page_size: "200",
-      sort: sortBy.value,
-    };
-    if (searchQuery.value) params.query = searchQuery.value;
-    if (filterChannel.value) params.channel = filterChannel.value;
-    if (filterTopicIds.value.length)
-      params.topics = filterTopicIds.value.join(",");
-    if (filterReferences.value) params.references = filterReferences.value;
-    const [from, to] = filterDates.value || [];
-    if (from) params.from = `${toDateStr(from)}T00:00:00`;
-    if (to) params.to = `${toDateStr(to)}T23:59:59`;
     const res = await axios.get(`/api/v1/wiki/${workspaceId.value}/pages`, {
-      params,
+      params: { ...currentFilterParams(), page: "1" },
     });
     pages.value = res.data.pages || [];
     total.value = res.data.total || 0;
@@ -939,6 +1085,33 @@ async function loadPages() {
     console.error("[wiki] load error", e);
   } finally {
     loading.value = false;
+  }
+}
+
+/**
+ * Nächste Seite anhängen. Vorher sendete die Ansicht ein festes page_size=200
+ * und nie einen page-Parameter – alles jenseits der ersten 200 Treffer war
+ * damit unerreichbar.
+ */
+async function loadMore() {
+  if (!workspaceId.value || loadingMore.value) return;
+  loadingMore.value = true;
+  try {
+    const next = currentPage.value + 1;
+    const res = await axios.get(`/api/v1/wiki/${workspaceId.value}/pages`, {
+      params: { ...currentFilterParams(), page: String(next) },
+    });
+    const more = res.data.pages || [];
+    // Nach Slug deduplizieren: zwischen zwei Abfragen kann sich die Sortierung
+    // verschoben haben (z.B. weil ein Artikel neu generiert wurde).
+    const seen = new Set(pages.value.map((p: any) => p.slug));
+    pages.value = [...pages.value, ...more.filter((p: any) => !seen.has(p.slug))];
+    total.value = res.data.total ?? total.value;
+    currentPage.value = next;
+  } catch (e: any) {
+    console.error("[wiki] load more error", e);
+  } finally {
+    loadingMore.value = false;
   }
 }
 
@@ -1003,6 +1176,9 @@ function onSearch() {
 function setActiveTab(type: string) {
   activeTab.value = type;
   if (selectedPage.value) goBackToOverview();
+  // Die Zeitleiste ist auf den aktiven Typ eingeschränkt und muss deshalb
+  // mitwandern, sonst zeigen ihre Zahlen einen anderen Bestand als die Liste.
+  loadMonthFacets();
   applyFilters();
 }
 
@@ -1199,8 +1375,36 @@ const renderedContent = computed(() => {
   return renderWikiContent(selectedPage.value.content);
 });
 
+/**
+ * Überschrift → Anker-Id. Muss zwischen Renderer und Inhaltsverzeichnis
+ * identisch sein, damit die Sprungmarken passen.
+ */
+function headingId(text: string): string {
+  return (
+    "abschnitt-" +
+    text
+      .toLowerCase()
+      .replace(/ä/g, "ae")
+      .replace(/ö/g, "oe")
+      .replace(/ü/g, "ue")
+      .replace(/ß/g, "ss")
+      .replace(/<[^>]+>/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+  );
+}
+
+/**
+ * Markdown → HTML über `marked`, wie es WikiPage.vue schon tut.
+ *
+ * Vorher lief das über handgeschriebene Regeln, die an drei Stellen scheiterten:
+ * eingerückte Listen (`  - …`) wurden nicht als Unterliste erkannt, jedes `\n`
+ * wurde zu einem `<br/>` (daher die weiten Abstände in Aufzählungen), und
+ * Blockquotes (`> "Zitat"`) blieben als Text mit vorangestelltem `>` stehen.
+ * Wiki-Links werden vorher ersetzt, weil `[[…]]` kein Markdown ist.
+ */
 function renderWikiContent(content: string): string {
-  let html = content.replace(
+  const withLinks = content.replace(
     /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
     (_match: string, slug: string, text?: string) => {
       const label = text || slug.replace(/^.*\//, "").replace(/-/g, " ");
@@ -1209,25 +1413,116 @@ function renderWikiContent(content: string): string {
     },
   );
 
-  // Externe Markdown-Links [Text](https://…) → echtes <a target=_blank> (Ebene 4)
+  let html = marked.parse(withLinks, { async: false }) as string;
+
+  // Anker auf die Überschriften setzen (Sprungziele des Inhaltsverzeichnisses)
   html = html.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
-    (_m: string, label: string, url: string) =>
-      `<a href="${url}" target="_blank" rel="noopener noreferrer" class="ext-link">${label} ↗</a>`,
+    /<(h[1-4])>(.*?)<\/\1>/g,
+    (_m: string, tag: string, inner: string) =>
+      `<${tag} id="${headingId(inner)}">${inner}</${tag}>`,
   );
 
-  html = html
-    .replace(/^### (.+)$/gm, "<h4>$1</h4>")
-    .replace(/^## (.+)$/gm, "<h3>$1</h3>")
-    .replace(/^# (.+)$/gm, "<h2>$1</h2>")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/^- (.+)$/gm, "<li>$1</li>")
-    .replace(/(<li>.*<\/li>\n?)+/g, "<ul>$&</ul>")
-    .replace(/\n\n/g, "</p><p>")
-    .replace(/\n/g, "<br/>");
+  // Externe Links in neuem Tab öffnen
+  html = html.replace(
+    /<a href="(https?:\/\/[^"]+)"/g,
+    '<a class="ext-link" target="_blank" rel="noopener noreferrer" href="$1"',
+  );
 
-  return `<p>${html}</p>`;
+  return DOMPurify.sanitize(html, { ADD_ATTR: ["target", "id", "data-slug"] });
+}
+
+/**
+ * Inhaltsverzeichnis des offenen Artikels aus seinen Überschriften.
+ * Sitzungsartikel sind lang (Kopfdaten, Lagebild, TOP 1…n, Beschlüsse,
+ * Kontroversen …) – ohne Sprungmarken muss man sie durchscrollen.
+ */
+const tocEntries = computed(() => {
+  const content = selectedPage.value?.content || "";
+  const entries: { id: string; text: string; level: number }[] = [];
+  for (const line of content.split("\n")) {
+    const m = line.match(/^(#{2,3})\s+(.+)$/);
+    if (!m) continue;
+    const text = stripWikiLinks(m[2].trim());
+    entries.push({ id: headingId(text), text, level: m[1].length });
+  }
+  return entries;
+});
+
+function scrollToHeading(id: string) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/** Sitzungsdatum des Quell-Dokuments (kurz), leer wenn keines vorliegt. */
+function sessionDate(p: any): string {
+  const raw = p?.document_published_at;
+  if (!raw) return "";
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? "" : formatDate(raw);
+}
+
+function pageFlags(p: any): string[] {
+  const f = p?.page_metadata?.flags;
+  return Array.isArray(f) ? f : [];
+}
+
+/** Marker-Bezeichner → lesbares Etikett. */
+const FLAG_LABELS: Record<string, string> = {
+  abweichende_fachliche_position: "abweichende Fachposition",
+  politischer_druck: "politischer Druck",
+  datenluecke: "Datenlücke",
+  kommunikationsstrategie: "Kommunikationsstrategie",
+  abweichung_von_who_ecdc: "Abweichung von WHO/ECDC",
+  risikobewertung_geaendert: "Risikobewertung geändert",
+  massnahme_ohne_evidenz: "Maßnahme ohne Evidenz",
+};
+function flagLabel(flag: string): string {
+  return FLAG_LABELS[flag] || flag.replace(/_/g, " ");
+}
+
+function toggleFlagFilter(flag: string) {
+  const i = filterFlags.value.indexOf(flag);
+  if (i >= 0) filterFlags.value.splice(i, 1);
+  else filterFlags.value.push(flag);
+  applyFilters();
+}
+
+/** Monate zu Jahren gruppieren, damit die Zeitleiste kompakt bleibt. */
+const monthsByYear = computed(() => {
+  const byYear: Record<string, { month: string; label: string; count: number }[]> = {};
+  const names = [
+    "Jan", "Feb", "Mär", "Apr", "Mai", "Jun",
+    "Jul", "Aug", "Sep", "Okt", "Nov", "Dez",
+  ];
+  for (const m of monthFacets.value) {
+    const [y, mm] = m.month.split("-");
+    (byYear[y] ||= []).push({
+      month: m.month,
+      label: names[parseInt(mm, 10) - 1] ?? mm,
+      count: m.count,
+    });
+  }
+  return Object.entries(byYear)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([year, months]) => ({
+      year,
+      months,
+      total: months.reduce((s, x) => s + x.count, 0),
+    }));
+});
+
+/** Klick auf einen Monat setzt den Zeitraumfilter auf diesen Monat. */
+function selectMonth(month: string) {
+  const [y, m] = month.split("-").map(Number);
+  const from = new Date(y, m - 1, 1);
+  const to = new Date(y, m, 0); // letzter Tag des Monats
+  filterDates.value = [from, to];
+  applyFilters();
+}
+
+function selectYear(year: string) {
+  filterDates.value = [new Date(+year, 0, 1), new Date(+year, 11, 31)];
+  applyFilters();
 }
 
 function slugLabel(slug: string): string {
@@ -1971,11 +2266,187 @@ function closeImport() {
 .reader-body :deep(p) {
   margin-bottom: 0.75rem;
 }
-.reader-body :deep(ul) {
+.reader-body :deep(ul),
+.reader-body :deep(ol) {
   margin: 0.5rem 0 0.75rem 1.5rem;
+  padding-left: 0.25rem;
+}
+/* Verschachtelte Liste (Einheit → Personen in der Teilnehmerliste) enger
+   setzen, damit die Zugehörigkeit optisch erkennbar bleibt. */
+.reader-body :deep(li > ul) {
+  margin: 0.15rem 0 0.35rem 1.1rem;
 }
 .reader-body :deep(li) {
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.2rem;
+  line-height: 1.55;
+}
+/* Absätze innerhalb von Listenpunkten erzeugen sonst einen Leerraum pro Punkt */
+.reader-body :deep(li > p) {
+  margin: 0;
+}
+.reader-body :deep(blockquote) {
+  margin: 0.6rem 0 0.8rem;
+  padding: 0.4rem 0 0.4rem 0.9rem;
+  border-left: 3px solid var(--color-primary);
+  background: var(--color-bg-secondary);
+  border-radius: 0 4px 4px 0;
+  font-style: italic;
+}
+.reader-body :deep(blockquote p) {
+  margin: 0;
+}
+.reader-body :deep(table) {
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+.reader-body :deep(th),
+.reader-body :deep(td) {
+  border: 1px solid var(--color-border);
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+}
+.reader-body :deep(code) {
+  background: var(--color-bg-secondary);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
+/* --- Zeitleiste (Jahr → Monat) --- */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.tl-year-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0.25rem 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.tl-year-head:hover {
+  background: var(--color-bg-secondary);
+}
+.tl-months {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.2rem;
+  padding: 0.2rem 0 0.35rem 0.6rem;
+}
+.tl-month {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.25rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.2rem 0.3rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+.tl-month:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.tl-month .cnt {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* --- Auffälligkeiten auf den Karten --- */
+.card-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.35rem 0 0.15rem;
+}
+.flag-chip {
+  font-size: 0.66rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 10px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.card-channel {
+  opacity: 0.75;
+}
+
+/* --- Nachladen --- */
+.load-more {
+  display: flex;
+  justify-content: center;
+  margin: 1.25rem 0 0.5rem;
+}
+.btn-more {
+  padding: 0.5rem 1.1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.btn-more:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.btn-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* --- Inhaltsverzeichnis --- */
+.reader-toc {
+  margin: 0.75rem 0 1.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-secondary);
+  max-width: 750px;
+}
+.toc-head {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.75rem 0.6rem;
+}
+.toc-item {
+  margin: 0.1rem 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+.toc-item a {
+  color: var(--color-primary);
+  text-decoration: none;
+  cursor: pointer;
+}
+.toc-item a:hover {
+  text-decoration: underline;
+}
+.toc-l3 {
+  padding-left: 1rem;
 }
 .reader-body :deep(.wiki-link) {
   color: var(--color-primary);

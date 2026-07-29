@@ -111,6 +111,154 @@ export const WIKI_SUMMARY_PROMPT = `Du bist ein Wiki-Redakteur. Transformiere de
 Gib zuerst die SUMMARY-Zeile aus, dann den Markdown-Inhalt. Keine anderen Vorbemerkungen.`;
 
 // ---------------------------------------------------------------------------
+// Sitzungsprotokolle: eigener Artikel-Prompt
+//
+// WIKI_SUMMARY_PROMPT ist für Video-Transkripte gebaut ("wie ein
+// Wikipedia-Eintrag", "Artikel in der Länge des Transkripts"). Auf ein
+// Sitzungsprotokoll angewandt zerstört das genau das, was zählt: die
+// Zuordnung, wer wann was gesagt hat, und die Unterscheidung zwischen
+// Diskussion, Beschluss und offenem Punkt. Ein Lexikonartikel über eine
+// einzelne Sitzung ist die falsche Textsorte.
+//
+// Dieser Prompt behält die Chronologie, die Sprecher-/Einheiten-Präfixe
+// (FG36:, Schaade:, INIG:) und die Fachkürzel unverändert und zitiert
+// Bewertungen wörtlich – das macht eine brisante Stellungnahme belegbar.
+// ---------------------------------------------------------------------------
+export const WIKI_PROTOCOL_SUMMARY_PROMPT = `Du bist Archivar und dokumentierst eine einzelne Sitzung. Du schreibst KEINEN Lexikonartikel, sondern eine präzise, gegliederte Wiedergabe dieses Protokolls.
+
+<protokoll>
+<sitzung>{{sessionLabel}}</sitzung>
+<inhalt>
+{{content}}
+</inhalt>
+</protokoll>
+
+<available_wiki_pages>
+{{extractedSlugs}}
+</available_wiki_pages>
+
+<glossar>
+{{glossar}}
+</glossar>
+
+<instructions>
+1. Die ERSTE Zeile deiner Ausgabe MUSS sein: SUMMARY: {Ein Satz, 15-40 Wörter: welches Gremium, welches Datum, welche Themen. Für die Wiki-Indexliste.}
+
+2. Die ZWEITE Zeile MUSS die Auffälligkeiten-Zeile sein, exakt in diesem Format und in einer einzigen Zeile:
+FLAGS: {"flags": ["..."], "quotes": ["..."]}
+Erlaubte Werte in "flags" – nimm nur auf, was im Protokoll tatsächlich belegt ist:
+- "abweichende_fachliche_position" – Fachleute widersprechen sich oder einer Einschätzung wird ausdrücklich widersprochen
+- "politischer_druck" – Einfluss oder Erwartung von BMG, Ministerien, Politik oder Ländern auf die fachliche Bewertung ist erkennbar
+- "datenluecke" – fehlende, unsichere oder widersprüchliche Daten werden thematisiert
+- "kommunikationsstrategie" – es wird über die Außendarstellung, Wortwahl oder das Zurückhalten von Informationen beraten
+- "abweichung_von_who_ecdc" – die eigene Bewertung weicht von WHO, ECDC oder anderen Institutionen ab
+- "risikobewertung_geaendert" – die Risikobewertung wird geändert oder ihre Änderung diskutiert
+- "massnahme_ohne_evidenz" – eine Maßnahme wird erwogen oder beschlossen, obwohl die Evidenzlage ausdrücklich als dünn bezeichnet wird
+In "quotes" höchstens 3 wörtliche Kurzzitate (je unter 200 Zeichen) aus dem Protokoll, die die Marker belegen.
+Gibt es keine Auffälligkeiten: FLAGS: {"flags": [], "quotes": []}
+Die Marker-Bezeichner selbst (z.B. "politischer_druck") gehören ausschließlich in diese Zeile und dürfen im Artikeltext NICHT vorkommen – dort steht, was im Protokoll passiert ist, nicht deine Einordnung.
+
+3. Die DRITTE Zeile MUSS die Überschrift sein: # {{sessionLabel}}
+
+4. Danach folgt der Artikel in genau dieser Gliederung. Abschnitte, für die das Protokoll nichts hergibt, LÄSST DU WEG – erfinde nichts:
+
+## Kopfdaten
+Gremium, Datum, Uhrzeit, Sitzungsort, Moderation, Protokollführung, Anlass, Aktenzeichen – als Liste, unverändert aus dem Protokoll übernommen. **Die Teilnehmenden gehören NICHT hierher**, sie haben ihren eigenen Abschnitt.
+
+## Teilnehmende
+Die Teilnehmerliste **mit ihrer zweistufigen Struktur**: die Organisationseinheit (z.B. FG36 oder Abteilung 3-Leitung) als Punkt der ersten Ebene, die zugehörigen Personen eingerückt darunter – genau so, wie es im Protokoll steht:
+
+- FG36
+  - Walter Haas
+  - Udo Buchholz
+
+Zieh die Liste NICHT zu einer Zeile oder einer flachen Aufzählung zusammen. Wer zu welcher Einheit gehört, ist eine eigenständige Information, die dabei verloren geht.
+
+## Lagebild
+Die berichtete Lage (Zahlen, Inzidenzen, internationale und nationale Entwicklung). **Alle Zahlen exakt übernehmen**, niemals runden oder zusammenfassen.
+
+## Themen im Einzelnen
+Die Tagesordnungspunkte in der Reihenfolge des Protokolls, mit ihren TOP-Nummern.
+**Zuordnung erhalten**: steht im Protokoll "FG36: wäre mit dieser Aussage vorsichtig" oder "Schaade: substantielle Zahl von Infektionsketten?", dann bleibt dieses Präfix stehen. Wer etwas gesagt hat, ist hier die wichtigste Information – niemals in unpersönliches Passiv umschreiben.
+
+## Beschlüsse und Aufträge
+Jeder Beschluss, jede Festlegung, jeder Arbeitsauftrag als eigener Punkt, mit der verantwortlichen Einheit. Im Protokoll oft als "Beschluss:", "To Do:", "X kümmert sich", "X klärt mit Y" erkennbar.
+
+## Kontroversen und abweichende Positionen
+Meinungsverschiedenheiten, Vorbehalte, Warnungen, Abweichungen von externen Einschätzungen (WHO, ECDC, BMG, Länder), Hinweise auf politischen oder zeitlichen Druck, offen gelassene Fragen.
+**Zitiere hier wörtlich** als Blockquote, wenn eine Bewertung, Warnung oder Positionierung ausgesprochen wird:
+> "es gibt Mensch zu Mensch Übertragung"
+Ein Zitat ist belegbar, eine Paraphrase nicht. Wenn es keine Kontroversen gab, lass den Abschnitt weg.
+
+## Offene Punkte
+Was ausdrücklich unklar, unentschieden oder auf eine spätere Sitzung verschoben wurde.
+
+(Ein Abschnitt mit einer Kürzel-Liste am Ende ist NICHT erwünscht – die Auflösungen gehören an die erste Nennung im Text, siehe Glossar-Regel.)
+
+5. **Wiki-Link-Regel**: Die available_wiki_pages-Liste zeigt Slugs mit Anzeigenamen ("[[slug]] = Anzeigename"). Erwähnst du einen Namen aus dieser Liste, schreibe ihn als [[slug|Anzeigename]]. Verwende die EXAKTEN Slugs, erfinde keine neuen. Setze pro Begriff höchstens einen Link, beim ersten Vorkommen.
+6. **Kein Informationsverlust, aber keine Auffüllung.** Jede Aussage, Zahl, Zuordnung und jeder Beschluss aus dem Protokoll muss vorkommen. Aber blähe nichts auf: keine Einleitungsfloskeln, keine Zusammenfassung am Ende, keine Bewertung durch dich. Wenn das Protokoll knapp ist, ist der Artikel knapp.
+7. **Glossar-Regel (streng)**: Der <glossar>-Block enthält geprüfte Auflösungen. Bei der **ersten** Nennung eines dort gelisteten Kürzels schreibe die Langform in Klammern dahinter, z.B. „FG36 (Fachgebiet 36 – Respiratorisch übertragbare Erkrankungen)"; danach nur noch das Kürzel.
+**Ein Kürzel, das NICHT im Glossar steht, lässt du unverändert stehen – ohne Erklärung, ohne Klammer, auch wenn du glaubst, es zu kennen.** Eine geratene Auflösung ist hier der schädlichste Fehler überhaupt: sie liest sich autoritativ und entwertet den ganzen Bestand. Für die RKI-internen Kürzel gilt das besonders, weil sich einige über die Jahre geändert haben.
+8. Schreibe auf {{language}}.
+9. **Leerer-Inhalt-Regel**: Enthält <inhalt> keinen substanziellen Text (z.B. nur "Ausfall des Krisenstabes"), gib exakt aus: "SUMMARY: {{sessionLabel}} – kein inhaltliches Protokoll vorhanden.", dann "FLAGS: {"flags": [], "quotes": []}", dann eine Zeile, die den vorhandenen Text wiedergibt. Erfinde KEINE Themen.
+</instructions>
+
+Gib die SUMMARY-Zeile aus, dann die FLAGS-Zeile, dann den Markdown-Artikel. Keine anderen Vorbemerkungen.`;
+
+// ---------------------------------------------------------------------------
+// Sitzungsprotokolle: Entity/Concept-Seiten als chronologische Belegliste
+//
+// WIKI_PAGE_MODIFY_PROMPT lässt Seiten unbegrenzt wachsen ("Erhalte vorhandene
+// Informationen"), während max_tokens fest bei 8192 liegt. Eine Seite, die in
+// 150 Sitzungen zitiert wird, läuft dagegen und verliert danach bei jedem
+// Update Inhalt. Als datierte Belegliste bleibt sie beschränkt: pro Sitzung ein
+// Eintrag – und beantwortet genau die Frage "was wurde wann dazu gesagt".
+// ---------------------------------------------------------------------------
+export const WIKI_PROTOCOL_PAGE_PROMPT = `Du pflegst eine Themenseite, die Aussagen aus vielen Sitzungsprotokollen chronologisch sammelt. Du bist Kompilierer, nicht Autor: du ordnest Belege ein, ohne zu deuten.
+
+<page_metadata>
+  <slug>{{pageSlug}}</slug>
+  <title>{{pageTitle}}</title>
+  <type>{{pageType}}</type>
+  <aliases>{{pageAliases}}</aliases>
+</page_metadata>
+
+Diese Seite handelt ausschließlich von **{{pageTitle}}**. Jede Aussage muss DIREKT davon handeln.
+
+<existing_page_content>
+{{existingContent}}
+</existing_page_content>
+
+{{additionsSection}}
+
+{{retractionsSection}}
+
+<valid_wiki_links>
+{{availableSlugs}}
+</valid_wiki_links>
+
+<instructions>
+1. Die ERSTE Zeile deiner Ausgabe MUSS sein: SUMMARY: {Ein Satz, 15-40 Wörter: was {{pageTitle}} ist und welche Rolle es in den Sitzungen spielt.}
+2. Die ZWEITE Zeile MUSS sein: # {{pageTitle}}
+3. Dann ein Einleitungsabsatz von höchstens 4 Sätzen: was {{pageTitle}} ist und worum es in den Sitzungen dazu ging. Diesen Absatz aktualisierst du, statt ihn wachsen zu lassen.
+4. Danach ein Abschnitt "## Belege nach Sitzung" als **chronologische Liste**, älteste Sitzung zuerst. Format je Eintrag:
+
+### {{sessionLabel}}
+- Was in dieser Sitzung dazu gesagt oder entschieden wurde, mit Zuordnung (z.B. "FG36:") und Inline-Zitat [cNNN].
+> "wörtliches Zitat, wenn eine Bewertung oder Position ausgesprochen wurde"
+
+**Pro Sitzung höchstens 5 Punkte und ein Zitat.** Das ist die entscheidende Regel: die Seite wächst in die Länge, nicht in die Tiefe – nur so bleibt sie auch nach 100 Sitzungen lesbar und vollständig.
+5. **Bestehende Sitzungs-Einträge unverändert übernehmen.** Du ergänzt nur den Eintrag für die neue Sitzung an der chronologisch richtigen Stelle. Schreibe alte Einträge NICHT um und kürze sie NICHT – sie sind bereits geprüft.
+6. Der <new_information>-Block enthält wörtliche Quell-Chunks mit [cNNN]-Labels. Verarbeite jeden. Versieh jede Tatsachenbehauptung, Zahl und jedes Datum mit dem passenden [cNNN].
+7. Behalte [[slug|name]]-Links NUR, wenn der Slug in <valid_wiki_links> steht. Entferne andere. Der eigene Slug ({{pageSlug}}) darf nicht als Link im eigenen Inhalt stehen.
+8. Erfinde nichts. RKI-Kürzel unverändert beibehalten.
+9. Schreibe auf {{language}}.
+{{emptyPageInstruction}}
+</instructions>
+
+Gib zuerst die SUMMARY-Zeile aus, dann den Markdown-Inhalt. Keine anderen Vorbemerkungen.`;
+
+// ---------------------------------------------------------------------------
 // Entity/Concept-Seite aktualisieren oder neu erstellen
 // ---------------------------------------------------------------------------
 export const WIKI_PAGE_MODIFY_PROMPT = `Du bist ein Wiki-Redakteur, der eine Wiki-Seite erstellt oder aktualisiert. Du bist ein KOMPILIERER, kein freier Autor: Du verdichtest die gelieferten Quell-Chunks zu einem vollständigen, gut gegliederten Artikel – ohne Fakten zu erfinden und ohne welche wegzulassen.
@@ -297,4 +445,37 @@ export function granularityGuidance(granularity?: string): string {
     default:
       return WIKI_GRANULARITY_STANDARD;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Prompt-Auswahl nach Dokumentart
+//
+// Die Art steht in documents.source_metadata.doc_kind – bewusst dort und nicht
+// in documents.type: keine Migration nötig, der Typ-Filter im Frontend bleibt
+// unberührt (dort steht weiterhin die Dateiendung), und weitere Dokumentarten
+// lassen sich ohne Schemaänderung ergänzen.
+// ---------------------------------------------------------------------------
+
+export type DocKind = "meeting_protocol" | "default";
+
+export function docKindOf(sourceMetadata: unknown): DocKind {
+  const kind =
+    sourceMetadata && typeof sourceMetadata === "object"
+      ? (sourceMetadata as Record<string, unknown>).doc_kind
+      : undefined;
+  return kind === "meeting_protocol" ? "meeting_protocol" : "default";
+}
+
+/** Artikel-Prompt für ein Kapitel/Dokument. */
+export function summaryPromptFor(kind: DocKind): string {
+  return kind === "meeting_protocol"
+    ? WIKI_PROTOCOL_SUMMARY_PROMPT
+    : WIKI_SUMMARY_PROMPT;
+}
+
+/** Prompt für Entity-/Concept-Seiten. */
+export function pagePromptFor(kind: DocKind): string {
+  return kind === "meeting_protocol"
+    ? WIKI_PROTOCOL_PAGE_PROMPT
+    : WIKI_PAGE_MODIFY_PROMPT;
 }

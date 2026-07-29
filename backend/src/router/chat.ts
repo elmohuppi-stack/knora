@@ -106,9 +106,22 @@ Antworte auf Deutsch. Nutze den folgenden Kontext, wenn er zur Frage passt, und
 weise dann darauf hin. Passt der Kontext nicht oder reicht er nicht aus, nutze
 dein eigenes Wissen und beantworte die Frage trotzdem. Erfinde keine Fakten.
 
+Jeder Kontext-Abschnitt beginnt mit seiner Quelle in eckigen Klammern. Nenne
+diese Quelle wörtlich hinter jeder Aussage, die du daraus übernimmst
+(z.B. „[2020-03-04 · Krisenstab]"). Ohne diese Angabe ist die Antwort nicht
+überprüfbar.
+
 KONTEXT:
 ${context}`;
 }
+
+/**
+ * Anzahl der Chunks für den RAG-Kontext. Der frühere Festwert 5 war für einen
+ * Bestand aus wenigen Dokumenten gedacht; bei mehreren hundert Dokumenten und
+ * größeren Chunks reicht das nicht, um eine Frage über mehrere Sitzungen hinweg
+ * zu beantworten.
+ */
+const CHAT_TOP_K = parseInt(process.env.CHAT_TOP_K || "12");
 
 // Nicht-streaming Chat-Nachricht senden (für History-Kompatibilität)
 chatRouter.post("/", zValidator("json", chatSchema), async (c) => {
@@ -141,7 +154,7 @@ chatRouter.post("/", zValidator("json", chatSchema), async (c) => {
   // RAG: Suche nach relevanten Chunks
   let searchResults: any[] = [];
   if (workspace_id) {
-    searchResults = await hybridSearch(workspace_id, message, 5);
+    searchResults = await hybridSearch(workspace_id, message, CHAT_TOP_K);
   }
 
   const context = searchResults
@@ -218,7 +231,7 @@ chatRouter.post("/stream", zValidator("json", chatSchema), async (c) => {
   // RAG: Suche nach relevanten Chunks
   let searchResults: any[] = [];
   if (workspace_id) {
-    searchResults = await hybridSearch(workspace_id, message, 5);
+    searchResults = await hybridSearch(workspace_id, message, CHAT_TOP_K);
   }
 
   const context = searchResults
