@@ -228,8 +228,12 @@ console.log(`Output-Tokens:      ~${estOutTokens.toLocaleString("de-DE")}`);
 console.log(
   `Kosten bei 0,27 $/1M in + 1,10 $/1M out: ~${((estInTokens / 1e6) * 0.27 + (estOutTokens / 1e6) * 1.1).toFixed(2)} $`,
 );
+// 30 s je Aufruf ist der gemessene Mittelwert mit deepseek-chat bei ~16k
+// Zeichen Eingabe und langer Ausgabe. Ein früherer Platzhalter von 6 s
+// unterschätzte die Laufzeit um das Fünffache.
+const SEC_PER_CALL = parseInt(process.env.WIKI_SEC_PER_CALL || "30");
 console.log(
-  `Laufzeit bei ~6 s/Aufruf: ~${((estCalls * 6) / 3600).toFixed(1)} h (sequenziell)`,
+  `Laufzeit bei ~${SEC_PER_CALL} s/Aufruf: ~${((estCalls * SEC_PER_CALL) / 3600).toFixed(1)} h (sequenziell)`,
 );
 console.log("-".repeat(70) + "\n");
 
