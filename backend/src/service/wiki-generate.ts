@@ -26,6 +26,7 @@ import {
   WIKI_CHUNK_CITATION_PROMPT,
   docKindOf,
   granularityGuidance,
+  normalizeProtocolFlags,
   pagePromptFor,
   summaryPromptFor,
 } from "./wiki-prompts.ts";
@@ -373,9 +374,9 @@ export async function generateWikiArticles(
       body = body.replace(flagsMatch[0], "").trim();
       try {
         const parsed = JSON.parse(flagsMatch[1]);
-        const flags = Array.isArray(parsed.flags)
-          ? parsed.flags.filter((f: unknown) => typeof f === "string")
-          : [];
+        // Gegen das geschlossene Vokabular normalisieren: das Modell hielt sich
+        // nicht an die Liste im Prompt und erfand Varianten.
+        const flags = normalizeProtocolFlags(parsed.flags);
         const quotes = Array.isArray(parsed.quotes)
           ? parsed.quotes.filter((q: unknown) => typeof q === "string").slice(0, 3)
           : [];

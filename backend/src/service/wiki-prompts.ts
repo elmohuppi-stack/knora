@@ -149,8 +149,8 @@ FLAGS: {"flags": ["..."], "quotes": ["..."]}
 Erlaubte Werte in "flags" – nimm nur auf, was im Protokoll tatsächlich belegt ist:
 - "abweichende_fachliche_position" – Fachleute widersprechen sich oder einer Einschätzung wird ausdrücklich widersprochen
 - "politischer_druck" – Einfluss oder Erwartung von BMG, Ministerien, Politik oder Ländern auf die fachliche Bewertung ist erkennbar
-- "datenluecke" – fehlende, unsichere oder widersprüchliche Daten werden thematisiert
-- "kommunikationsstrategie" – es wird über die Außendarstellung, Wortwahl oder das Zurückhalten von Informationen beraten
+- "datenluecke" – eine Entscheidung wird WEGEN fehlender oder widersprüchlicher Daten getroffen, verschoben oder ausdrücklich unter Vorbehalt gestellt. NICHT setzen, wenn Datenlücken bloß erwähnt oder beklagt werden – das kommt in fast jeder Sitzung vor und wäre als Markierung wertlos.
+- "kommunikationsstrategie" – es wird beraten, eine Information ZURÜCKZUHALTEN, anders zu benennen als fachlich zutreffend, oder eine Aussage mit Rücksicht auf ihre Wirkung zu formulieren. NICHT setzen für gewöhnliche Pressearbeit, Textabstimmung oder Veröffentlichungstermine.
 - "abweichung_von_who_ecdc" – die eigene Bewertung weicht von WHO, ECDC oder anderen Institutionen ab
 - "risikobewertung_geaendert" – die Risikobewertung wird geändert oder ihre Änderung diskutiert
 - "massnahme_ohne_evidenz" – eine Maßnahme wird erwogen oder beschlossen, obwohl die Evidenzlage ausdrücklich als dünn bezeichnet wird
@@ -455,6 +455,74 @@ export function granularityGuidance(granularity?: string): string {
 // unberührt (dort steht weiterhin die Dateiendung), und weitere Dokumentarten
 // lassen sich ohne Schemaänderung ergänzen.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Auffälligkeits-Marker: geschlossenes Vokabular
+//
+// Die erlaubten Werte stehen im Prompt – das genügt nicht. Bei 180 Protokollen
+// erfand das Modell zehn eigene Varianten (acht Schreibweisen für
+// "politischer_druck", "maßnahme_ohne_evidenz" mit ß). Die Facette zerfiel
+// dadurch in Einzeltreffer. Wie bei den Wiki-Slugs gilt: das Vokabular
+// bestimmt der Code, nicht das Modell.
+// ---------------------------------------------------------------------------
+
+export const PROTOCOL_FLAGS = [
+  "abweichende_fachliche_position",
+  "politischer_druck",
+  "datenluecke",
+  "kommunikationsstrategie",
+  "abweichung_von_who_ecdc",
+  "risikobewertung_geaendert",
+  "massnahme_ohne_evidenz",
+] as const;
+
+export type ProtocolFlag = (typeof PROTOCOL_FLAGS)[number];
+
+/** Bekannte Abweichungen auf den kanonischen Marker abbilden. */
+const FLAG_ALIASES: Record<string, ProtocolFlag> = {
+  massnahme_ohne_evidenz: "massnahme_ohne_evidenz",
+  "maßnahme_ohne_evidenz": "massnahme_ohne_evidenz",
+  massnahmen_ohne_evidenz: "massnahme_ohne_evidenz",
+  datenlucke: "datenluecke",
+  "datenlücke": "datenluecke",
+  datenluecken: "datenluecke",
+  abweichung_von_who: "abweichung_von_who_ecdc",
+  abweichung_von_ecdc: "abweichung_von_who_ecdc",
+  abweichende_position: "abweichende_fachliche_position",
+  fachlicher_dissens: "abweichende_fachliche_position",
+  risikobewertung_aenderung: "risikobewertung_geaendert",
+  "risikobewertung_geändert": "risikobewertung_geaendert",
+};
+
+/**
+ * Normalisiert die Marker eines Artikels: bildet Varianten ab, verwirft
+ * Unbekanntes, entdoppelt. Alles, was mit "politisch" beginnt, landet auf
+ * politischer_druck – das war die häufigste Erfindung des Modells.
+ */
+export function normalizeProtocolFlags(raw: unknown): ProtocolFlag[] {
+  if (!Array.isArray(raw)) return [];
+  const out = new Set<ProtocolFlag>();
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const key = item.trim().toLowerCase().replace(/[\s-]+/g, "_");
+    if ((PROTOCOL_FLAGS as readonly string[]).includes(key)) {
+      out.add(key as ProtocolFlag);
+      continue;
+    }
+    const mapped = FLAG_ALIASES[key];
+    if (mapped) {
+      out.add(mapped);
+      continue;
+    }
+    if (key.startsWith("politisch")) {
+      out.add("politischer_druck");
+      continue;
+    }
+    // Unbekannt: bewusst verwerfen. Ein Marker, den die Oberfläche nicht kennt,
+    // ist als Facette wertlos und verwässert die Zählung.
+  }
+  return [...out];
+}
 
 export type DocKind = "meeting_protocol" | "default";
 
