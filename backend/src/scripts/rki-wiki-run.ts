@@ -139,9 +139,16 @@ const allDocs = await db
   .where(and(...conditions))
   .orderBy(asc(documents.published_at), asc(documents.title));
 
-// Bereits erzeugte Artikel finden. Weil jedes Protokoll unter CHAPTER_CHARS
-// liegt, entsteht genau eine Seite mit parent_slug IS NULL – ein eindeutiges
-// Kennzeichen für "schon generiert".
+// Bereits erzeugte Artikel finden.
+//
+// Bewusst NICHT über `parent_slug IS NULL`: rki-month-index.ts hängt die
+// Sitzungsartikel unter Monats-Übersichtsseiten und setzt dabei parent_slug.
+// Eine Prüfung darauf hielt danach alle 159 vorhandenen Artikel für fehlend
+// und hätte den kompletten Lauf ein zweites Mal bezahlt.
+//
+// Stattdessen: eine summary-Seite zu diesem Dokument, die selbst keine
+// Monatsseite ist. Monatsseiten haben ohnehin kein source_document_id, der
+// Slug-Ausschluss ist nur die zweite Sicherung.
 const doneRows = await db
   .select({ docId: wikiPages.source_document_id })
   .from(wikiPages)
@@ -149,7 +156,7 @@ const doneRows = await db
     and(
       eq(wikiPages.workspace_id, ws.id),
       eq(wikiPages.page_type, "summary"),
-      sql`${wikiPages.parent_slug} is null`,
+      sql`${wikiPages.slug} not like 'monat-%'`,
     ),
   );
 const done = new Set(doneRows.map((r) => r.docId).filter(Boolean) as string[]);
