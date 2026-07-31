@@ -272,6 +272,9 @@ let ok = 0;
 let failed = 0;
 let entities = 0;
 let concepts = 0;
+/** Titel der Dokumente ohne Artikel – am Ende ausgeben, damit ein Ausfall nicht
+ *  im Log untergeht und gezielt nachgefahren werden kann. */
+const failedTitles: string[] = [];
 
 const logId = await logActivity({
   action: "wiki_generate",
@@ -293,18 +296,22 @@ try {
 
     try {
       const result = await generateWikiArticles(d.id, ws.id);
-      if (result) {
+      // Auf den Artikel prüfen, nicht auf das Rückgabeobjekt: generateWikiArticles
+      // liefert seit dem Fix null, wenn keine Seite entstand.
+      if (result?.summary) {
         ok++;
         entities += result.entities;
         concepts += result.concepts;
       } else {
         failed++;
-        console.warn(`${pos} ⚠️  ${d.title}: kein Ergebnis`);
+        failedTitles.push(d.title);
+        console.warn(`${pos} ⚠️  ${d.title}: kein Artikel erzeugt`);
       }
     } catch (err: any) {
       // Ein fehlgeschlagenes Dokument darf den Lauf nicht beenden – beim
       // nächsten Start wird es wieder aufgegriffen.
       failed++;
+      failedTitles.push(d.title);
       console.error(`${pos} ❌ ${d.title}: ${err.message}`);
     }
 
@@ -342,6 +349,10 @@ console.log("WIKI-LAUF ABGESCHLOSSEN");
 console.log("=".repeat(70));
 console.log(`Artikel erzeugt:   ${ok}`);
 console.log(`Fehlgeschlagen:    ${failed}`);
+if (failedTitles.length > 0) {
+  console.log("\nOhne Artikel geblieben – erneuter Lauf greift sie automatisch auf:");
+  for (const t of failedTitles) console.log(`  - ${t}`);
+}
 console.log(`Entity-Seiten:     ${entities}`);
 console.log(`Concept-Seiten:    ${concepts}`);
 console.log(`Dauer:             ${(durationMs / 60000).toFixed(1)} min`);

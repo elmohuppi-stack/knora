@@ -752,6 +752,16 @@ export async function generateWikiArticles(
 
   console.log(`[wiki-gen] ========== ENDE (${Date.now() - t0}ms) ==========`);
 
+  // Ist kein einziger Artikel entstanden, ist der Lauf für dieses Dokument
+  // gescheitert – auch wenn die Funktion sonst durchgelaufen ist. Vorher gab
+  // sie ein Objekt mit summary: null zurück; jeder Aufrufer prüfte nur
+  // "Objekt vorhanden" und meldete Erfolg. Bei einer Provider-Störung entstand
+  // so eine Erfolgsmeldung für Dokumente, die keinen Artikel bekommen hatten.
+  if (!summaryPage) {
+    console.log(`[wiki-gen] ❌ Kein Artikel erzeugt (LLM lieferte nichts)`);
+    return null;
+  }
+
   return {
     summary: summaryPage,
     entities: entityCount,
