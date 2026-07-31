@@ -30,6 +30,53 @@ services:
       - appnet
       - hetzner-network
 
+  # Wartungs-Container für die Skripte unter backend/src/scripts (Import,
+  # Embedding-Backfill, Wiki-Läufe, Migrationen). Läuft durch das Profil "tools"
+  # nie im Normalbetrieb mit und wird von `docker compose up -d` ignoriert.
+  #
+  # Der Grund für ein eigenes Image: das App-Image enthält nur das gebündelte
+  # dist/index.js und keine node_modules – dort scheitert jedes Skript sofort.
+  #
+  # Beispiele (auf dem Host, im Repo-Verzeichnis):
+  #   docker compose --profile tools build tools
+  #   docker compose --profile tools run --rm tools \
+  #     bun run src/scripts/verify-rki.ts --workspace "RKI Sitzungsprotokolle"
+  #
+  # Für lange Läufe abgekoppelt starten, damit ein Verbindungsabbruch nichts tut:
+  #   docker compose --profile tools run -d --name rki-wiki tools \
+  #     bun run src/scripts/rki-wiki-run.ts --workspace <id> --depth summary
+  #   docker logs -f rki-wiki
+  tools:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: tools
+    profiles:
+      - tools
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-knora}:${DB_PASSWORD:-changeme}@knora-db:5432/knora
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      PARSER_URL: http://parser:8000/parse
+      YOUTUBE_TRANSCRIPT_PROVIDER: ${YOUTUBE_TRANSCRIPT_PROVIDER:-}
+      APIFY_API_KEY: ${APIFY_API_KEY:-}
+      SUPADATA_API_KEY: ${SUPADATA_API_KEY:-}
+      # Bei Massenläufen zwingend: sonst startet jede Wiki-Generierung einen
+      # workspace-weiten Embedding-Sweep und hunderte davon überlagern sich.
+      WIKI_EMBED_AFTER_GENERATE: "0"
+    volumes:
+      # Zwischenstufe der RKI-Protokolle (Markdown + manifest.json), per rsync
+      # auf den Host gelegt. Bewusst außerhalb des Repos, damit `git pull` beim
+      # Deploy nicht darüber stolpert.
+      - ${RKI_MD_DIR:-/root/rki-md}:/data:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    # Wartungsläufe sind sequenziell und streamend; genügend Luft auf dem
+    # kleinen Host, aber begrenzt, damit ein Fehllauf nicht den Server mitnimmt.
+    mem_limit: 512m
+    networks:
+      - appnet
+
   frontend:
     build:
       context: ./frontend
