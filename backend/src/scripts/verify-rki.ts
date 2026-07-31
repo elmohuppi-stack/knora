@@ -205,27 +205,58 @@ else warn("keine Chunks mit Präfix – stammt der Import aus dem alten Splitter
 
 // ---------------------------------------------------------------------------
 // 4. Datumskorrekturen angekommen?
-//    Die 4 als 2020 abgelegten Sitzungen enthalten Impfstoff-/Varianten-Themen,
-//    die im Januar/Februar 2020 nicht existierten. Landen sie im falschen Jahr,
-//    ist die Override-Tabelle nicht gegriffen.
+//
+//    Vier Sitzungen tragen im Quellmaterial eine kopierte Vorjahresvorlage und
+//    sind dort als Januar/Februar 2020 datiert, obwohl ihr Inhalt aus 2021
+//    stammt. Greift die Override-Tabelle nicht, landen sie im falschen Jahr.
+//
+//    Als Marker taugen NUR die Varianten-Bezeichnungen: B.1.1.7 wurde im
+//    Dezember 2020 benannt, B.1.351 im Januar 2021. "BioNTech" und "Impfquote"
+//    sind dagegen KEINE Anachronismen – der Krisenstab besprach ab März 2020
+//    Impfstoffkandidaten und ganzjährig die Influenza-Impfquote. Eine frühere
+//    Fassung dieser Prüfung nutzte sie und meldete zehn Fehlalarme, u.a. für
+//    die historisch korrekte Meldung vom 03.07.2020 über die Phase-1/2-Daten
+//    von Pfizer/BioNTech.
 // ---------------------------------------------------------------------------
 console.log("\n4) Datumskorrekturen");
 
 const [anachron] = await db
-  .select({ n: sql<number>`count(*)::int`, titel: sql<string>`string_agg(${documents.title}, ', ')` })
+  .select({
+    n: sql<number>`count(*)::int`,
+    titel: sql<string>`string_agg(${documents.title}, ', ')`,
+  })
   .from(documents)
   .where(
     and(
       eq(documents.workspace_id, ws.id),
-      sql`${documents.published_at} < '2020-11-01'`,
-      sql`(${documents.content} ilike '%BioNTech%' or ${documents.content} ilike '%B.1.1.7%' or ${documents.content} ilike '%Impfquote%')`,
+      sql`${documents.published_at} < '2020-12-01'`,
+      sql`(${documents.content} like '%B.1.1.7%' or ${documents.content} like '%B.1.351%')`,
     ),
   );
 if (anachron.n === 0) {
-  ok("kein Dokument vor November 2020 mit BioNTech/B.1.1.7/Impfquote");
+  ok("kein Dokument vor Dezember 2020 nennt B.1.1.7 oder B.1.351");
 } else {
   bad(
-    `${anachron.n} Dokument(e) vor 11/2020 mit unmöglichem Inhalt → Datumskorrektur fehlt: ${anachron.titel}`,
+    `${anachron.n} Dokument(e) vor 12/2020 nennen eine erst später benannte Variante → Datumskorrektur fehlt: ${anachron.titel}`,
+  );
+}
+
+// Gegenprobe: die korrigierten Januar/Februar-2021-Sitzungen müssen da sein.
+const [korrJan21] = await db
+  .select({ n: sql<number>`count(*)::int` })
+  .from(documents)
+  .where(
+    and(
+      eq(documents.workspace_id, ws.id),
+      sql`${documents.source_metadata} ->> 'date_source' = 'override'`,
+      sql`${documents.published_at} between '2021-01-01' and '2021-03-01'`,
+    ),
+  );
+if (korrJan21.n >= 4) {
+  ok(`${korrJan21.n} korrigierte Sitzungen liegen jetzt in Januar/Februar 2021`);
+} else {
+  warn(
+    `nur ${korrJan21.n} korrigierte Sitzungen in Januar/Februar 2021 (erwartet ≥ 4)`,
   );
 }
 
@@ -294,19 +325,29 @@ interface Probe {
   /** So viele verschiedene Dokumente müssen mindestens auftauchen. */
   minDistinct?: number;
 }
+// Die Fragen müssen eine im Bestand EINDEUTIGE Antwort haben. Eine allgemeine
+// Frage ("Wie schätzte die WHO das Risiko ein?") wird von hunderten Sitzungen
+// gleich gut bedient – ein Treffer auf eine bestimmte Sitzung wäre dann Zufall
+// und der Test schlägt grundlos an.
 const proben: Probe[] = [
   {
-    frage: "Warum wurde die ausführliche Risikoeinschätzung nicht veröffentlicht?",
-    erwartet: /^2020-01-(1[6-9]|2\d) · AG-nCoV/,
+    frage: "Welche Krisenstabssitzung fiel aus?",
+    erwartet: /2022-04-04/,
   },
   {
-    frage: "Was sagte das RKI zum Entry-Screening an Flughäfen?",
-    erwartet: /AG-nCoV|Krisenstab/,
+    frage:
+      "Pfizer und BioNTech melden Ergebnisse der Phase-1/2-Studie mit 45 Freiwilligen",
+    erwartet: /2020-07-03/,
+  },
+  {
+    frage:
+      "Entry-Screening an Flughäfen wird nicht empfohlen, keine wissenschaftliche Evidenz",
+    erwartet: /2020-01-(2\d) · AG-nCoV/,
     minDistinct: 2,
   },
   {
-    frage: "Wie schätzte die WHO das globale Risiko ein?",
-    erwartet: /2020-01|2020-02/,
+    frage: "Interministerielle Arbeitsgruppe Long COVID, erste Sitzung",
+    erwartet: /Ressortbesprechung/,
   },
 ];
 
