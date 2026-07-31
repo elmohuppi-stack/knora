@@ -182,9 +182,14 @@ const skippedNoWiki = allDocs.filter((d) => {
   return meta.wiki_skip === true || d.content_len < 1200;
 }).length;
 
+// `done` zählt workspace-weit, nicht nur im Filter – das getrennt ausweisen,
+// sonst liest sich "180 haben schon einen Artikel" bei 198 gefilterten
+// Dokumenten so, als wären fast alle schon fertig.
+const doneInFilter = allDocs.filter((d) => done.has(d.id)).length;
 console.log(
-  `📋 ${allDocs.length} Dokumente im Filter, ${done.size} haben schon einen Artikel, ` +
-    `${skippedNoWiki} ohne Artikel vorgesehen → ${todo.length} zu generieren`,
+  `📋 ${allDocs.length} Dokumente im Filter: ${doneInFilter} haben schon einen Artikel, ` +
+    `${skippedNoWiki} ohne Artikel vorgesehen → ${todo.length} zu generieren ` +
+    `(${done.size} Artikel im Workspace insgesamt)`,
 );
 
 if (todo.length === 0) {
