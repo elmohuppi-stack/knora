@@ -354,17 +354,22 @@ const proben: Probe[] = [
 for (const p of proben) {
   const res = await hybridSearch(ws.id, p.frage, 8);
   const titel = [...new Set(res.map((r) => r.document_title))];
-  const treffer = titel.some((t) => p.erwartet.test(t));
+  // Rang des erwarteten Treffers mit ausgeben. Nur "gefunden" zu melden
+  // verschleiert, ob die richtige Sitzung oben stand oder auf Platz 8 –
+  // und genau das ist die interessante Aussage über die Retrieval-Güte.
+  const rang = titel.findIndex((t) => p.erwartet.test(t));
   console.log(`     ❓ ${p.frage}`);
-  console.log(`        → ${titel.slice(0, 4).join(" | ")}`);
+  console.log(
+    `        → ${titel.map((t, i) => (i === rang ? `«${t}»` : t)).join(" | ")}`,
+  );
   if (res.length === 0) {
     bad("keine Treffer – sind die Embeddings da?");
-  } else if (!treffer) {
+  } else if (rang < 0) {
     warn(`kein Titel passt auf ${p.erwartet}`);
   } else if (p.minDistinct && titel.length < p.minDistinct) {
     warn(`nur ${titel.length} verschiedene Dokumente (erwartet ≥ ${p.minDistinct})`);
   } else {
-    ok("Quelle nennt die passende Sitzung");
+    ok(`passende Sitzung auf Rang ${rang + 1} von ${titel.length}`);
   }
 }
 
