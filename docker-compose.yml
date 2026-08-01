@@ -18,9 +18,6 @@ services:
       YOUTUBE_TRANSCRIPT_PROVIDER: ${YOUTUBE_TRANSCRIPT_PROVIDER:-}
       APIFY_API_KEY: ${APIFY_API_KEY:-}
       SUPADATA_API_KEY: ${SUPADATA_API_KEY:-}
-    depends_on:
-      db:
-        condition: service_healthy
     restart: unless-stopped
     # Große Uploads werden mehrfach in den RAM kopiert (parseBody → arrayBuffer → Blob).
     # Cap an den kleinen, geteilten Prod-Host (3,7 GB, ~15 weitere Apps) angepasst:
@@ -68,14 +65,14 @@ services:
       # auf den Host gelegt. Bewusst außerhalb des Repos, damit `git pull` beim
       # Deploy nicht darüber stolpert.
       - ${RKI_MD_DIR:-/root/rki-md}:/data:ro
-    depends_on:
-      db:
-        condition: service_healthy
     # Wartungsläufe sind sequenziell und streamend; genügend Luft auf dem
     # kleinen Host, aber begrenzt, damit ein Fehllauf nicht den Server mitnimmt.
     mem_limit: 512m
+    # hetzner-network zusätzlich zu appnet: dort liegt seit der Konsolidierung
+    # die Datenbank. Ohne das schlägt jedes Wartungsskript beim Verbinden fehl.
     networks:
       - appnet
+      - hetzner-network
 
   frontend:
     build:
@@ -90,24 +87,16 @@ services:
       - appnet
       - hetzner-network
 
-  db:
-    image: pgvector/pgvector:pg17
-    volumes:
-      - data:/var/lib/postgresql/data
-    environment:
-      POSTGRES_USER: ${DB_USER:-knora}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
-      POSTGRES_DB: knora
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-knora}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      appnet:
-        aliases:
-          - knora-db
+  # ACHTUNG: Hier stand der db-Service. Die Datenbank läuft seit der
+  # Konsolidierung als eigener Stack unter /var/www/pg-shared und bedient auch
+  # mediathek, umami und mathe-quiz. Sie nutzt WEITERHIN DAS VOLUME knora_data
+  # – es wurde nicht kopiert, sondern unverändert übernommen (dort liegt auch
+  # der HNSW-Index auf chunks.embedding).
+  #
+  # Diesen Service deshalb NICHT wieder aufnehmen: ein zweiter Postgres auf
+  # demselben Datenverzeichnis beschädigt es. Der Alias "knora-db" wird jetzt
+  # von der gemeinsamen Instanz im hetzner-network getragen, darum bleibt
+  # DATABASE_URL oben unverändert.
 
   # Parser wird für PDF/DOCX/HTML-Import zwingend gebraucht und läuft daher immer mit
   # (kein Profil-Gate mehr – sonst startet ihn `docker compose up -d --build` beim
@@ -125,8 +114,9 @@ services:
     networks:
       - appnet
 
-volumes:
-  data:
+# Kein volumes-Block mehr: das Datenverzeichnis (Volume knora_data) gehört
+# jetzt zum Stack /var/www/pg-shared und wird dort als externes Volume
+# eingebunden.
 
 networks:
   appnet:

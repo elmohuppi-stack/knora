@@ -111,6 +111,11 @@ echo 'DEPLOY_HOST=elmarhepp' >> .env
 > Migrationen werden stattdessen als **rohes SQL direkt in den DB-Container**
 > gespielt – die `.sql`-Dateien liegen nach `git pull` im Checkout unter
 > `backend/drizzle/`.
+>
+> **Seit der DB-Konsolidierung** läuft Postgres nicht mehr in knoras Compose-Stack,
+> sondern als gemeinsame Instanz unter `/var/www/pg-shared` (Container `pg-shared`,
+> im Netz erreichbar unter dem Alias `knora-db`). Statt `docker compose exec db`
+> also **`docker exec -i pg-shared`** verwenden.
 
 ```bash
 ssh elmarhepp
@@ -121,23 +126,23 @@ source .env
 # NUR die noch nicht angewandten Migrationen einspielen (additive DDL).
 # Reihenfolge einhalten. Bereits angewandte NICHT erneut ausführen
 # (raw SQL ist nicht idempotent → "column already exists").
-docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0002_naive_ultimo.sql
-docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0003_careless_ghost_rider.sql
-docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0004_polite_mongoose.sql
+docker exec -i pg-shared psql -U "$DB_USER" -d knora < backend/drizzle/0002_naive_ultimo.sql
+docker exec -i pg-shared psql -U "$DB_USER" -d knora < backend/drizzle/0003_careless_ghost_rider.sql
+docker exec -i pg-shared psql -U "$DB_USER" -d knora < backend/drizzle/0004_polite_mongoose.sql
 # 0005 ist idempotent (IF NOT EXISTS) und enthält ein Backfill, das bereits
 # generierte Kapitel-Artikel an ihre Übersichtsseite hängt.
-docker compose exec -T db psql -U "$DB_USER" -d knora < backend/drizzle/0005_flowery_spyke.sql
+docker exec -i pg-shared psql -U "$DB_USER" -d knora < backend/drizzle/0005_flowery_spyke.sql
 ```
 
 **Welche Migrationen fehlen?** Vorhandene Spalten/Tabellen prüfen, z. B.:
 
 ```bash
 # Hat die documents-Tabelle schon die channel-Spalte (Migration 0002)?
-docker compose exec -T db psql -U "$DB_USER" -d knora -c "\d documents" | grep channel
+docker exec -i pg-shared psql -U "$DB_USER" -d knora -c "\d documents" | grep channel
 # Gibt es die topics-Tabelle (0003) / wiki_page_revisions (0004)?
-docker compose exec -T db psql -U "$DB_USER" -d knora -c "\dt" | grep -E "topics|wiki_page_revisions"
+docker exec -i pg-shared psql -U "$DB_USER" -d knora -c "\dt" | grep -E "topics|wiki_page_revisions"
 # Hat wiki_pages schon parent_slug/sort_order (0005)?
-docker compose exec -T db psql -U "$DB_USER" -d knora -c "\d wiki_pages" | grep -E "parent_slug|sort_order"
+docker exec -i pg-shared psql -U "$DB_USER" -d knora -c "\d wiki_pages" | grep -E "parent_slug|sort_order"
 ```
 
 Nur die Migrationen einspielen, deren Objekte noch fehlen.

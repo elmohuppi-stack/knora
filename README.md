@@ -80,7 +80,9 @@ cp .env.example .env
 ### 3. Datenbank starten
 
 ```bash
-docker compose up -d db
+# Lokale Dev-DB (Port 5432). Die Prod-Compose enthält keinen db-Service mehr,
+# dort läuft Postgres als gemeinsame Instanz außerhalb dieses Stacks.
+docker compose -f docker-compose.dev.yml up -d db
 ```
 
 ### 4. Abhängigkeiten installieren
@@ -264,7 +266,7 @@ Für einen API-basierten JSON-Export existiert außerdem [`scripts/knora-import.
 
 ```bash
 # Services (DB nur)
-docker compose up -d db
+docker compose -f docker-compose.dev.yml up -d db
 
 # Backend (Hot-Reload)
 cd backend && bun run dev
