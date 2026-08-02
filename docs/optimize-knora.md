@@ -35,8 +35,9 @@ gegen die Live-Datenbank gemessen, nicht geschätzt. Zustandsangaben stammen aus
 | 11 | `.env` auf Mode `600` | Server | umgesetzt |
 | 12 | knora nicht mehr unter `openclaw.elmarhepp.de` erreichbar | Server (nginx) | umgesetzt |
 | 13 | Tägliches Datenbank-Backup | Server | umgesetzt |
-| — | App-Rolle `knora` ist SUPERUSER | Server | **offen**, siehe unten |
-| — | Umstellung auf den kanonischen Host `pg-shared` | Server | **offen**, siehe unten |
+| 14 | App-Rolle `knora_app` statt Superuser `knora` | DB + `.env` | umgesetzt |
+| 15 | Verbindung über den kanonischen Host `pg-shared` | `docker-compose.yml` | umgesetzt |
+| 16 | `CONNECT` auf die knora-DB für PUBLIC entzogen | DB | umgesetzt |
 
 ---
 
@@ -304,38 +305,84 @@ vollständig und einspielbar sind.
 
 ---
 
+## 14–16. Rollentrennung, kanonischer Host, Abschottung
+
+**Befund.** Die Rolle, mit der sich die App verband, war SUPERUSER — sie umgeht
+sämtliche Rechteprüfungen, hatte damit Vollzugriff auf mediathek, umami und
+mathe_quiz und konnte über `COPY … FROM PROGRAM` Befehle im Datenbank-Container
+ausführen. Vor der Konsolidierung folgenlos (eine Instanz, eine Datenbank), seit
+dem 1. August nicht mehr.
+
+Einfach entziehen ging nicht: `knora` ist die einzige Superuser-Rolle im
+Cluster und Eigentümerin der Datenbanken `knora`, `postgres` und `template1`.
+
+**Maßnahme.** Neue Rolle `knora_app` (kein Superuser, kein CREATEDB, kein
+CREATEROLE) als Eigentümerin der Anwendungsobjekte; `knora` bleibt
+Wartungsrolle. Passwort mit `openssl rand -hex 24` auf dem Server erzeugt und
+nie durch ein Terminal geschickt — **hex statt base64**, weil `+`, `/` und `=`
+in einer `postgresql://`-URL prozentkodiert werden müssten.
+
+**Kein `REASSIGN OWNED`.** Das hätte laut Postgres-Dokumentation auch die
+geteilten Objekte übertragen, also die drei Datenbanken — die neue,
+unprivilegierte Rolle hätte sie löschen dürfen. Stattdessen eine Schleife, die
+gezielt auswählt, was **nicht** zu einer Extension gehört:
+
+| | Anzahl | Eigentümer danach |
+|---|---|---|
+| Anwendungstabellen (`public` + `drizzle`) | 15 | `knora_app` |
+| Sequenzen | 5 | `knora_app` (folgen ihrer Tabelle) |
+| Extension-Funktionen (`vector`, `pg_trgm`, `amcheck`, `pg_stat_statements`) | 160 | `knora` — **unangetastet** |
+| Extension-Views | 2 | `knora` — **unangetastet** |
+| Datenbanken `knora`, `postgres`, `template1` | 3 | `knora` — **unangetastet** |
+
+Zwei Dinge, die dabei auffielen:
+
+- **Serial-Sequenzen lassen sich nicht einzeln umhängen** („is linked to
+  table"). Sie folgen ihrer Tabelle automatisch; der erste Anlauf brach
+  deswegen ab und rollte vollständig zurück. Die Schleife überspringt sie jetzt
+  über ihre `deptype = 'a'`-Abhängigkeit.
+- **Die knora-Datenbank erlaubte PUBLIC das Verbinden** (`datacl` war `=Tc`,
+  bei den drei anderen `=T`). Beim Umbau wurde `REVOKE CONNECT … FROM PUBLIC`
+  nur auf die wiederhergestellten Datenbanken angewandt — knora war
+  übersprungen worden, weil es als Volume übernommen und nicht restauriert
+  wurde. Damit konnten sich `mediathek`, `umami` und `mathe_user` mit der
+  knora-Datenbank verbinden. Nachgeholt; `knora_app` hat ein explizites
+  `CONNECT`.
+
+**Rechte, die gesetzt wurden:** `CONNECT` auf die Datenbank, `USAGE, CREATE` auf
+`public` (das Schema gehört `pg_database_owner`, nicht der App-Rolle — ohne
+`CREATE` scheitert jede Migration, die einen Index anlegt), Eigentum am Schema
+`drizzle`, und Default-Privilegien, damit von `knora` bei Wartung angelegte
+Objekte für die App benutzbar bleiben.
+
+**Vor der Umstellung getestet** — die neue Rolle wurde geprüft, solange die App
+noch mit der alten lief:
+
+| Muss gehen | |
+|---|---|
+| Verbinden, `SELECT` | ✓ |
+| `INSERT` / `UPDATE` / `DELETE` | ✓ |
+| Sequenzen benutzen | ✓ |
+| DDL: `CREATE TABLE`, `ALTER TABLE`, `CREATE INDEX`, `DROP` | ✓ (die Migrationen brauchen es) |
+| Migrationstabelle in `drizzle` beschreiben | ✓ |
+
+| Darf nicht gehen | |
+|---|---|
+| Verbinden zu `mediathek`, `umami`, `mathe_quiz` | verweigert |
+| `COPY … TO PROGRAM` (Befehlsausführung) | verweigert |
+
+**Kanonischer Host (15).** `DATABASE_URL` zeigt nicht mehr auf den Alt-Alias
+`knora-db`, sondern auf `pg-shared`. Der Alias bleibt im `hetzner-network`
+bestehen, weil mediathek noch daran hängt — knora braucht ihn nicht mehr.
+
+> **Abhängigkeit, die man leicht übersieht:** `pg_dumpall -U knora` im
+> Backup-Skript braucht `knora` weiterhin als Superuser — nur so landen alle
+> vier Datenbanken *und* die Rollen im Dump. Die Rolle behält den Superuser
+> deshalb bewusst; sie wird nur nicht mehr von der App benutzt.
+
+---
+
 ## Offen geblieben
-
-### App-Rolle `knora` ist SUPERUSER
-
-Die Rolle, mit der sich die App verbindet, umgeht sämtliche Rechteprüfungen. Sie
-hat damit Vollzugriff auf mediathek, umami und mathe_quiz und kann über
-`COPY … FROM PROGRAM` Befehle im Datenbank-Container ausführen. Vor der
-Konsolidierung war das folgenlos (eine Instanz, eine Datenbank) — jetzt teilen
-sich vier Apps eine Instanz.
-
-Einfach entziehen geht nicht: `knora` ist die einzige Superuser-Rolle im
-Cluster. Der Weg ist eine zweite, unprivilegierte Rolle `knora_app` für die App,
-während `knora` Wartungsrolle bleibt.
-
-**Warum getrennt geplant:** `REASSIGN OWNED BY knora TO knora_app` überträgt
-laut Postgres-Dokumentation nicht nur die Tabellen der aktuellen Datenbank,
-sondern auch **geteilte Objekte** — und `knora` ist Eigentümerin der Datenbanken
-`knora`, `postgres` und `template1`. Nach einem naiven `REASSIGN` dürfte die
-neue App-Rolle diese Datenbanken löschen, das Gegenteil des Ziels. Der Schritt
-braucht eine explizite Objektliste und eine Probe, kein Einzeiler.
-
-Abgemildert wird das Risiko dadurch, dass die Datenbank auf keinem Host-Port
-lauscht und nur über das Docker-Netz erreichbar ist.
-
-### Verbindung über den Alt-Alias `knora-db`
-
-`DATABASE_URL` zeigt auf `knora-db`. Kanonisch wäre `pg-shared`; der Alias
-existiert nur, damit knora und mediathek beim Umbau ihre Verbindungsstrings
-nicht ändern mussten. Kein Fehler, aber solange er benutzt wird, muss er
-gepflegt und erklärt werden. Sinnvoll zusammen mit der Rollentrennung zu
-erledigen — beides betrifft dieselbe Zeile in der `.env` und teilt sich einen
-Neustart.
 
 ### Serverweit, wirkt auf knora
 

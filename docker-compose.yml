@@ -13,7 +13,7 @@ services:
       # statt still auf einen Default zurückzufallen. Mit `${JWT_SECRET:-dev-secret-change-me}`
       # wäre eine verlorene .env unbemerkt geblieben: die App liefe weiter, aber mit
       # einem Secret, das im Repo steht, und jeder könnte sich Admin-Tokens ausstellen.
-      DATABASE_URL: postgresql://${DB_USER:?DB_USER fehlt in .env}:${DB_PASSWORD:?DB_PASSWORD fehlt in .env}@knora-db:5432/knora
+      DATABASE_URL: postgresql://${DB_USER:?DB_USER fehlt in .env}:${DB_PASSWORD:?DB_PASSWORD fehlt in .env}@pg-shared:5432/knora
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET fehlt in .env}
       PARSER_URL: http://parser:8000/parse
       PORT: 3000
@@ -65,7 +65,7 @@ services:
       - tools
     environment:
       # Siehe app-Service: Pflichtvariablen, kein stiller Default.
-      DATABASE_URL: postgresql://${DB_USER:?DB_USER fehlt in .env}:${DB_PASSWORD:?DB_PASSWORD fehlt in .env}@knora-db:5432/knora
+      DATABASE_URL: postgresql://${DB_USER:?DB_USER fehlt in .env}:${DB_PASSWORD:?DB_PASSWORD fehlt in .env}@pg-shared:5432/knora
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET fehlt in .env}
       PARSER_URL: http://parser:8000/parse
       YOUTUBE_TRANSCRIPT_PROVIDER: ${YOUTUBE_TRANSCRIPT_PROVIDER:-}
@@ -120,9 +120,11 @@ services:
   # der HNSW-Index auf chunks.embedding).
   #
   # Diesen Service deshalb NICHT wieder aufnehmen: ein zweiter Postgres auf
-  # demselben Datenverzeichnis beschädigt es. Der Alias "knora-db" wird jetzt
-  # von der gemeinsamen Instanz im hetzner-network getragen, darum bleibt
-  # DATABASE_URL oben unverändert.
+  # demselben Datenverzeichnis beschädigt es.
+  #
+  # DATABASE_URL zeigt auf den kanonischen Hostnamen "pg-shared". Der Alt-Alias
+  # "knora-db" existiert im hetzner-network weiterhin, weil mediathek noch daran
+  # hängt – knora braucht ihn seit dem 2. August nicht mehr.
 
   # Parser wird für PDF/DOCX/HTML-Import zwingend gebraucht und läuft daher immer mit
   # (kein Profil-Gate mehr – sonst startet ihn `docker compose up -d --build` beim

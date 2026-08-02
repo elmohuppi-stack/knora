@@ -48,7 +48,10 @@ WEB_PORT=3000
 FRONTEND_PORT=3084
 
 # === Datenbank ===
-DB_USER=knora
+# Die App-Rolle, NICHT die Wartungsrolle `knora`. knora_app ist Eigentümerin
+# der Tabellen (kann also migrieren), aber kein Superuser und kommt damit nicht
+# an die Datenbanken der anderen Apps in derselben Instanz.
+DB_USER=knora_app
 DB_PASSWORD=<sicheres Passwort generieren>
 
 # === App ===
@@ -70,7 +73,7 @@ YOUTUBE_TRANSCRIPT_PROVIDER=apify
 APIFY_API_KEY=apify_api_...
 ```
 
-> **Wichtig:** Die `DATABASE_URL` wird automatisch aus `DB_USER`, `DB_PASSWORD` und dem DB-Host `knora-db` zusammengesetzt (siehe `docker-compose.yml`). Kein manuelles Setzen nötig.
+> **Wichtig:** Die `DATABASE_URL` wird automatisch aus `DB_USER`, `DB_PASSWORD` und dem DB-Host `pg-shared` zusammengesetzt (siehe `docker-compose.yml`). Kein manuelles Setzen nötig.
 
 ---
 
@@ -113,9 +116,14 @@ echo 'DEPLOY_HOST=elmarhepp' >> .env
 > `backend/drizzle/`.
 >
 > **Seit der DB-Konsolidierung** läuft Postgres nicht mehr in knoras Compose-Stack,
-> sondern als gemeinsame Instanz unter `/var/www/pg-shared` (Container `pg-shared`,
-> im Netz erreichbar unter dem Alias `knora-db`). Statt `docker compose exec db`
-> also **`docker exec -i pg-shared`** verwenden.
+> sondern als gemeinsame Instanz unter `/var/www/pg-shared` (Container und
+> Netzwerkname `pg-shared`). Statt `docker compose exec db` also
+> **`docker exec -i pg-shared`** verwenden.
+>
+> **Achtung bei `-U "$DB_USER"`:** Seit dem 2. August ist `DB_USER` in der `.env`
+> die App-Rolle `knora_app` — sie ist Eigentümerin der Tabellen und darf damit
+> DDL, aber sie ist **kein** Superuser. Für Wartung, die mehr braucht (neue
+> Extensions, Rollen, `pg_dumpall`), stattdessen `-U knora` verwenden.
 
 ```bash
 ssh elmarhepp
