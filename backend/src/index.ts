@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { sql } from "drizzle-orm";
+import { db } from "./db/index.ts";
 import { authRouter } from "./router/auth.ts";
 import { workspaceRouter } from "./router/workspace.ts";
 import { adminRouter } from "./router/admin.ts";
@@ -25,8 +27,20 @@ app.use(
   }),
 );
 
-// Health
-app.get("/health", (c) => c.json({ status: "ok" }));
+// Health – prüft bewusst die Datenbankverbindung mit. Ein Endpunkt, der nur
+// "ok" zurückgibt, meldet auch dann Gesundheit, wenn die App keine einzige
+// Anfrage mehr beantworten kann: Beim Umzug auf die gemeinsame Postgres-Instanz
+// lieferte knora eine Minute lang 500er, während /health weiter "ok" sagte.
+// Der Docker-Healthcheck hängt an diesem Endpunkt und wäre sonst wertlos.
+app.get("/health", async (c) => {
+  try {
+    await db.execute(sql`select 1`);
+    return c.json({ status: "ok", db: "ok" });
+  } catch (err) {
+    console.error("[health] Datenbank nicht erreichbar:", err);
+    return c.json({ status: "degraded", db: "unreachable" }, 503);
+  }
+});
 
 // Auth Routes
 app.route("/api/v1/auth", authRouter);

@@ -187,10 +187,17 @@ export async function listPages(
   // gesuchten Marker enthält (OR-Semantik). Bewusst ein @>-Vergleich je Marker
   // statt ?| mit zusammengebautem Array: so ist jeder Wert ein echter
   // Query-Parameter und nicht in SQL hineininterpoliert.
+  //
+  // Der Vergleich läuft gegen die GANZE Spalte (`page_metadata @> '{"flags":…}'`)
+  // und nicht gegen die Extraktion (`page_metadata -> 'flags' @> …`): der Index
+  // wiki_pages_metadata_gin_idx liegt auf der Spalte mit jsonb_path_ops, und zu
+  // einer ->-Extraktion links vom Operator passt er nicht. Gemessen auf
+  // Produktivdaten: 11,7 ms Seq Scan über 5.703 Zeilen gegenüber 0,4 ms per
+  // Bitmap Index Scan. Semantisch sind beide Formen gleich für "enthält Marker X".
   if (options?.flags && options.flags.length > 0) {
     const flagConds = options.flags.map(
       (f) =>
-        sql`${wikiPages.page_metadata} -> 'flags' @> ${JSON.stringify([f])}::jsonb`,
+        sql`${wikiPages.page_metadata} @> ${JSON.stringify({ flags: [f] })}::jsonb`,
     );
     conditions = and(conditions, or(...flagConds))!;
   }
