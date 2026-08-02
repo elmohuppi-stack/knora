@@ -2,15 +2,24 @@
 
 Alle Befunde und Maßnahmen, die knora betreffen, aus dem Server-Durchlauf vom
 2. August 2026. Der serverweite Kontext (Datenbank-Konsolidierung am 1. August,
-alle 23 Befunde über alle Apps) steht im Nachbarrepo `optimize-hetzner`,
+alle 24 Befunde über alle Apps) steht im Nachbarrepo `optimize-hetzner`,
 insbesondere in dessen `OFFENE-PROBLEME.md`. Dieses Dokument ist der
 knora-Ausschnitt und die Umsetzungs-Historie dazu.
 
+> **Stand: alle 17 Maßnahmen sind umgesetzt und auf dem Live-Server
+> nachgewiesen.** Am 2. August abends wurden 28 Einzelprüfungen gegen den
+> laufenden Server gefahren (Indexe, Collations, Extensions, Rollen und Rechte,
+> Container-Zustand, Dateirechte, nginx, Backup) — alle bestanden. Was **nicht**
+> knora-spezifisch und weiterhin offen ist, steht unter
+> [Offen geblieben](#offen-geblieben).
+
 **Ausgangspunkt:** knoras Datenbank läuft seit dem 1. August nicht mehr im
 eigenen Compose-Stack, sondern in einer gemeinsamen Postgres-Instanz
-(`pg-shared`, Container-Alias `knora-db`), die auch mediathek, umami und
-mathe-quiz bedient. Das Datenverzeichnis wurde dabei unverändert übernommen —
-knora wurde nicht migriert.
+(Container `pg-shared`), die auch mediathek, umami und mathe-quiz bedient. Das
+Datenverzeichnis wurde dabei unverändert übernommen — knora wurde nicht
+migriert. Seit dem 2. August verbindet sich knora über den kanonischen Namen
+`pg-shared`; der Alt-Alias `knora-db` existiert im Netz weiter, weil mediathek
+noch daran hängt.
 
 **Methodik:** Alle Performance-Aussagen sind mit `EXPLAIN (ANALYZE, BUFFERS)`
 gegen die Live-Datenbank gemessen, nicht geschätzt. Zustandsangaben stammen aus
@@ -20,24 +29,29 @@ gegen die Live-Datenbank gemessen, nicht geschätzt. Zustandsangaben stammen aus
 
 ## Übersicht
 
-| # | Maßnahme | Wo | Status |
-|---|---|---|---|
-| 1 | Wiki-Suche: Trigramm-Index gegen 1.200-ms-Seq-Scan | Migration `0008` | umgesetzt |
-| 2 | HNSW-Index als ausführbare Migration statt Kommentar | Migration `0009` | umgesetzt |
-| 3 | Technische Identifikatoren auf `COLLATE "C"` | Migration `0010` | umgesetzt |
-| 4 | Auffälligkeiten-Facette nutzt ihren GIN-Index | `service/wiki.ts` | umgesetzt |
-| 5 | `/health` prüft die Datenbankverbindung mit | `index.ts` | umgesetzt |
-| 6 | Healthchecks für alle drei Dauerdienste | `docker-compose.yml` | umgesetzt |
-| 7 | `mem_limit` für den `frontend`-Container | `docker-compose.yml` | umgesetzt |
-| 8 | Pflichtvariablen statt stiller Default-Secrets | `docker-compose.yml` | umgesetzt |
-| 9 | `knora-api.elmarhepp.de` aus Skript und Doku entfernt | `deploy.sh`, `docs/` | umgesetzt |
-| 10 | `pg_stat_statements` + `amcheck` in der knora-DB | Server | umgesetzt |
-| 11 | `.env` auf Mode `600` | Server | umgesetzt |
-| 12 | knora nicht mehr unter `openclaw.elmarhepp.de` erreichbar | Server (nginx) | umgesetzt |
-| 13 | Tägliches Datenbank-Backup | Server | umgesetzt |
-| 14 | App-Rolle `knora_app` statt Superuser `knora` | DB + `.env` | umgesetzt |
-| 15 | Verbindung über den kanonischen Host `pg-shared` | `docker-compose.yml` | umgesetzt |
-| 16 | `CONNECT` auf die knora-DB für PUBLIC entzogen | DB | umgesetzt |
+| # | Maßnahme | Kategorie | Wo | Live nachgewiesen durch |
+|---|---|---|---|---|
+| 1 | Wiki-Suche: Trigramm-Index gegen 1.200-ms-Seq-Scan | Performance | Migration `0008` | `EXPLAIN` zeigt BitmapOr, 1,45 ms |
+| 2 | HNSW-Index als ausführbare Migration statt Kommentar | Robustheit | Migration `0009` | Index vorhanden und gültig |
+| 3 | Technische Identifikatoren auf `COLLATE "C"` | Datenverlust | Migration `0010` | 5 Spalten mit `collation_name = C` |
+| 4 | Auffälligkeiten-Facette nutzt ihren GIN-Index | Performance | `service/wiki.ts` | 0,69 ms, 7 Marker zeilengleich |
+| 5 | `/health` prüft die Datenbankverbindung mit | Betrieb | `index.ts` | liefert `{"status":"ok","db":"ok"}` |
+| 6 | Healthchecks für alle drei Dauerdienste | Betrieb | `docker-compose.yml` | app, frontend, parser je `healthy` |
+| 7 | `mem_limit` für den `frontend`-Container | Betrieb | `docker-compose.yml` | `HostConfig.Memory = 134217728` |
+| 8 | Pflichtvariablen statt stiller Default-Secrets | Sicherheit | `docker-compose.yml` | kein Default-Secret in der Container-Umgebung |
+| 9 | `knora-api.elmarhepp.de` aus Skript und Doku entfernt | Aufräumen | `deploy.sh`, `docs/` | keine Referenz mehr im Repo |
+| 10 | `pg_stat_statements` + `amcheck` in der knora-DB | Diagnose | Server | beide in `pg_extension` |
+| 11 | `.env` auf Mode `600` | Sicherheit | Server | `stat -c %a` = 600 |
+| 12 | knora nicht mehr unter `openclaw.elmarhepp.de` erreichbar | Sicherheit | Server (nginx) | Symlink weg, Domain liefert nichts mehr |
+| 13 | Tägliches Backup **der gesamten Instanz** | Datenverlust | Server | Dump + Restore-Test über alle 4 DBs |
+| 14 | Überwachung des Backups (täglich 8:15) | Betrieb | Server | `check-backup.sh` installiert, läuft durch |
+| 15 | App-Rolle `knora_app` statt Superuser `knora` | Sicherheit | DB + `.env` | App verbunden als `knora_app`, kein Superuser |
+| 16 | Verbindung über den kanonischen Host `pg-shared` | Aufräumen | `docker-compose.yml` | `@pg-shared:5432` in der Umgebung |
+| 17 | `CONNECT` auf die knora-DB für PUBLIC entzogen | Sicherheit | DB | `datacl` = `=T` statt `=Tc` |
+
+Alle Änderungen an Code, Migrationen und Compose sind in `main` (Commits
+`af2b988`, `2fabb6a`, `add0905`, `28d89d3`, `0494474`, `d5a8185`); der Server
+steht auf demselben Stand mit sauberem Arbeitsverzeichnis.
 
 ---
 
@@ -268,7 +282,19 @@ späteren openclaw-Start mit einem freien Port wieder aktiviert werden kann.
 
 ---
 
-## 13. Datenbank-Backup
+## 13–14. Backup der gesamten Instanz, mit Überwachung
+
+> **Wichtig zur Einordnung: Das Backup ist nicht knora-spezifisch.** Es sichert
+> per `pg_dumpall` den **kompletten Postgres-Cluster** — alle vier Datenbanken
+> und alle Rollen. Dass es in diesem Dokument steht, liegt daran, dass knora mit
+> 1,27 von 1,31 GB der weitaus größte Anteil daran ist und der Anlass war.
+> Zuständig ist der Nachbarrepo-Eintrag `optimize-hetzner`, Punkt 1.
+>
+> Zwei Details, die den gegenteiligen Eindruck erwecken, es aber nicht belegen:
+> `-U knora` im Skript ist die **Anmelderolle** (die Bootstrap-Rolle des
+> Clusters), keine Datenbankauswahl — `pg_dumpall` hat gar keinen
+> Datenbank-Filter. Und `/var/backups/pg-shared/` heißt nach der **Instanz**,
+> nicht nach einer App.
 
 **Befund.** Es gab keinen automatischen Dump — weder Cron noch systemd-Timer.
 Für knora hat es **nie einen gegeben**: Bei der Konsolidierung wurden die drei
@@ -277,35 +303,52 @@ unverändert übernommen. Die Sicherung unter `/var/backups/consolidation` ist
 6,2 MB groß; 1,3 GB passen dort nicht hinein.
 
 Der Wiki-Bestand ist über Monate LLM-generiert. Ein Verlust wäre nicht durch
-Re-Import zu ersetzen, sondern nur durch einen neuen Generierungslauf.
+Re-Import zu ersetzen, sondern nur durch einen neuen Generierungslauf — und die
+68.887 Embeddings sind bezahlte LLM-Aufrufe.
 
-**Maßnahme.** `/usr/local/sbin/pg-shared-backup` (Mode `700`), täglich um 3:30
-über `/etc/cron.d/pg-shared-backup`. Das Skript bricht bei jedem Fehler ab,
+**Maßnahme (13).** `/usr/local/sbin/pg-shared-backup` (Mode `700`), täglich um
+3:30 über `/etc/cron.d/pg-shared-backup`. Das Skript bricht bei jedem Fehler ab,
 prüft die Größe gegen eine Untergrenze, testet das Archiv mit `gzip -t` und
 räumt alte Dumps erst auf, **nachdem** der neue validiert ist. Aufbewahrung
-14 Tage. Skript und Restore-Test liegen im Nachbarrepo unter
-`deploy/pg-shared/`.
+14 Tage. Skript, Prüfskript und Restore-Test liegen im Nachbarrepo unter
+`deploy/pg-shared/`, dort steht auch die ausführliche Begründung.
 
-**Erster Lauf und Restore-Test am 2. August durchgeführt:**
+**Maßnahme (14).** `pg-shared-check-backup`, täglich um 8:15. Es prüft das
+*Ergebnis* statt den Lauf: Ist `.last-success` jünger als 26 Stunden, liegt
+überhaupt ein Dump da, ist er groß genug, reicht der Platz für den nächsten? Das
+fängt die stille Fehlerart ab — cron läuft gar nicht, Docker-Socket weg, Platte
+voll. Es schweigt, solange alles stimmt.
 
-| | Wert |
+**Was der Dump enthält** (am liegenden Archiv nachgezählt):
+
+| | |
 |---|---|
-| Dumpgröße (gepackt) | 484 MB — die Embedding-Vektoren dominieren |
+| Datenbanken | `knora` (15 Tabellen), `mediathek` (30), `umami` (18), `mathe_quiz` (4) |
+| Rollen | `knora`, `knora_app`, `mediathek`, `umami`, `mathe_user` — inkl. SCRAM-Hashes |
+| Größe gepackt | ~485 MB — die Embedding-Vektoren dominieren |
 | Laufzeit | 1 min 37 s |
-| Restore in einen Wegwerf-Container | fehlerfrei |
-| Zeilenabgleich Live ↔ Restore | knora 77.028 · mediathek 78.207 · umami 381 · mathe_quiz 4 — **alle identisch** |
 
-Beim Restore-Test wird der HNSW-Vektorindex übersprungen: sein Aufbau kostet auf
-diesem Host Minuten und viel Speicher, und er ist ein abgeleitetes Artefakt —
+**Restore-Test am 2. August bestanden.** Zurückgespielt in einen isolierten
+Wegwerf-Container, keine Fehler, Zeilenabgleich Live ↔ Restore über **alle vier**
+Datenbanken: knora 77.028 · mediathek 78.207 · umami 381 · mathe_quiz 4 —
+identisch. Der HNSW-Vektorindex wird dabei übersprungen: sein Aufbau kostet auf
+diesem Host Minuten und viel Speicher, und er ist ein abgeleitetes Artefakt,
 seit Migration `0009` aus dem Repo reproduzierbar. Getestet wird, ob die *Daten*
 vollständig und einspielbar sind.
 
-> **Platzbedarf beachten:** 484 MB × 14 Tage ≈ 6,8 GB. Bei aktuell 52 GB frei
+**Was der Dump nicht abdeckt:** alles außerhalb von Postgres — die SQLite-Apps
+(finanzen, elmo-scanner, pick-the-place), mediatheks Redis, nginx-Configs,
+Zertifikate, `.env`-Dateien, hochgeladene Dateien. Diese Schicht deckt das
+Hetzner-Backup-Add-on ab (Image der ganzen Platte, 7 Slots). Die beiden ergänzen
+sich: das Image für „Host kaputt", der Dump für „eine Datenbank zurückholen,
+ohne die anderen zehn Apps mitzudrehen".
+
+> **Platzbedarf beachten:** 485 MB × 14 Tage ≈ 6,8 GB. Bei aktuell 51 GB frei
 > unkritisch, aber es ist der größte einzelne Posten, der ab jetzt wächst.
 
 ---
 
-## 14–16. Rollentrennung, kanonischer Host, Abschottung
+## 15–17. Rollentrennung, kanonischer Host, Abschottung
 
 **Befund.** Die Rolle, mit der sich die App verband, war SUPERUSER — sie umgeht
 sämtliche Rechteprüfungen, hatte damit Vollzugriff auf mediathek, umami und
@@ -371,7 +414,7 @@ noch mit der alten lief:
 | Verbinden zu `mediathek`, `umami`, `mathe_quiz` | verweigert |
 | `COPY … TO PROGRAM` (Befehlsausführung) | verweigert |
 
-**Kanonischer Host (15).** `DATABASE_URL` zeigt nicht mehr auf den Alt-Alias
+**Kanonischer Host (16).** `DATABASE_URL` zeigt nicht mehr auf den Alt-Alias
 `knora-db`, sondern auf `pg-shared`. Der Alias bleibt im `hetzner-network`
 bestehen, weil mediathek noch daran hängt — knora braucht ihn nicht mehr.
 
@@ -386,19 +429,54 @@ bestehen, weil mediathek noch daran hängt — knora braucht ihn nicht mehr.
 
 ### Serverweit, wirkt auf knora
 
+Nichts davon ist knora-spezifisch — alle Punkte liegen im Nachbarrepo
+`optimize-hetzner`, hier stehen sie nur, weil sie auf knora durchschlagen:
+
 - **`libc6`-Update und Reboot stehen aus.** Danach `amcheck` über alle
   Datenbanken; bei Befund `REINDEX` und
   `ALTER DATABASE … REFRESH COLLATION VERSION`. Die wichtigsten Textschlüssel
-  sind durch Maßnahme 3 bereits immun.
+  sind durch Maßnahme 3 bereits immun, und das Backup steht — das war die
+  Voraussetzung dafür, diesen Schritt überhaupt anzugehen.
 - **Docker-Logs ohne Rotation.** `knora-frontend-1` hat 28 MB, keine
-  `/etc/docker/daemon.json`. Serverweite Maßnahme.
-- **Backup off-site.** Der Dump liegt auf derselben Platte wie die Datenbank.
+  `/etc/docker/daemon.json`. Greift erst für neu erstellte Container, also
+  rollierend nachzuziehen.
+- **Der Alias `knora-db`** bleibt im `hetzner-network`, bis auch mediathek auf
+  `pg-shared` umgestellt ist. knora hängt nicht mehr daran.
+
+### Beobachtungen, die noch keine Maßnahme sind
+
+- **Die Index-Zähler auf `wiki_pages` sind zurückgesetzt.** Migration `0010`
+  schreibt die Tabelle neu und baut die Indexe dabei mit auf; `pg_stat_user_indexes`
+  fängt für diese Tabelle wieder bei null an. Eine belastbare Aussage darüber,
+  welche Indexe wirklich ungenutzt sind, braucht deshalb ein paar Tage echten
+  Verkehr. Vorher gemessen waren es drei — zwei davon sind durch Maßnahme 1
+  und 4 erklärt und werden jetzt benutzt.
+- **Die lokale Dev-Datenbank ist abgedriftet.** In `drizzle.__drizzle_migrations`
+  stehen nur `0000` und `0001`, das Schema hat aber 14 Tabellen — der Rest wurde
+  per `db:push` eingespielt. `bun run db:migrate` scheitert dort mit „column
+  already exists", unabhängig von diesen Änderungen. Die neuen Migrationen
+  wurden deshalb lokal per `psql` getestet. Sollte geradegezogen werden, sonst
+  ist die Migrationskette lokal unbenutzbar.
 
 ---
 
 ## Verifikation
 
-Nach dem Ausrollen geprüft:
+**Abnahme am 2. August, abends: 28 Prüfungen gegen den laufenden Server, alle
+bestanden.**
+
+| Bereich | geprüft |
+|---|---|
+| Server-Repo | sauber, auf `origin/main` |
+| Migrationen | Trigramm- und HNSW-Index vorhanden, `COLLATE C` auf 5 Spalten, keine ungültigen Indexe |
+| Extensions | `pg_trgm`, `amcheck`, `pg_stat_statements`, `vector` |
+| Rolle | `knora_app` ohne Superuser/CREATEDB, besitzt 20 Objekte, DB gehört weiter `knora`, PUBLIC ausgesperrt, App verbunden als `knora_app` |
+| Container | alle drei `healthy`, frontend auf 128 MB, `@pg-shared:5432`, kein Default-Secret |
+| Rechte/nginx | `.env` `600`, openclaw-Symlink weg, Config erhalten |
+| Backup | beide Skripte `700`, zwei Cron-Jobs, Dumps vorhanden, Prüfung läuft durch |
+| Laufender Code | `/health` liefert `{"status":"ok","db":"ok"}` — nur im neuen Image vorhanden |
+
+Zum Nachfahren:
 
 ```sh
 # Wirkt der Trigramm-Index? (Plan muss BitmapOr statt Filter zeigen)
@@ -428,17 +506,22 @@ Nach dem Ausrollen am 2. August 2026 gemessen:
 |---|---|---|
 | Wiki-Suche (5.703 Seiten, „Maske") | 1.200 ms | **1,45 ms** warm · 10,0 ms kalt |
 | Auffälligkeiten-Facette | 11,7 ms Seq Scan | **0,69 ms** Bitmap Index Scan |
-| Genutzte Indexe auf `wiki_pages` | 4 von 7 | **6 von 8** |
+| Indexe auf `wiki_pages`, die der Planner nutzen *kann* | 5 von 7 | **8 von 8** |
 | Healthchecks | keine | app, frontend, parser je `healthy` |
 | `/health` | statisches `ok` | `{"status":"ok","db":"ok"}`, 503 bei DB-Ausfall |
 | Container ohne `mem_limit` | 1 (frontend) | 0 |
 | Default-Secrets als Fallback | 2 | 0 |
 | `.env`-Rechte | `644` | `600` |
 | knora unter fremder Domain erreichbar | ja (openclaw) | nein |
-| Datenbank-Backup | keins, nie eines gegeben | täglich, mit geprüftem Restore |
+| App-Rolle | SUPERUSER, Zugriff auf alle 4 DBs | `knora_app`, nur die eigene DB |
+| PUBLIC darf sich mit der knora-DB verbinden | ja | nein |
+| Backup des Clusters | keins, nie eines gegeben | täglich, überwacht, Restore geprüft |
 | btree-Indexe per `amcheck` geprüft | nicht möglich (Extension fehlte) | 27, fehlerfrei |
 
-Die drei zuvor ungenutzten Indexe sind auf einen geschrumpft: `wiki_pages_fts_idx`
-und `wiki_pages_metadata_gin_idx` werden jetzt benutzt. `wiki_pages_out_links_gin_idx`
-bleibt bei `idx_scan = 0` — der Index ist korrekt geschrieben und funktioniert
-(0,5 ms), die Backlink-Facette wird nur selten aufgerufen.
+Zur vorletzten Zeile in der Index-Zeile: „nutzen können" statt „genutzt", weil
+die Zähler durch Migration `0010` zurückgesetzt wurden (siehe
+[Beobachtungen](#beobachtungen-die-noch-keine-maßnahme-sind)). Vorher waren
+`wiki_pages_fts_idx` und `wiki_pages_metadata_gin_idx` bei `idx_scan = 0`,
+obwohl der Code sie adressierte — genau das haben Maßnahme 1 und 4 behoben.
+`wiki_pages_out_links_gin_idx` war schon vorher korrekt geschrieben, wird aber
+selten aufgerufen.
