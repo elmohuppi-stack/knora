@@ -9,8 +9,12 @@ services:
     # ports:
     #   - "127.0.0.1:${WEB_PORT:-3000}:3000"
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-knora}:${DB_PASSWORD:-changeme}@knora-db:5432/knora
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      # Pflichtvariablen mit :? statt :- – ein fehlender Wert bricht den Start ab,
+      # statt still auf einen Default zurückzufallen. Mit `${JWT_SECRET:-dev-secret-change-me}`
+      # wäre eine verlorene .env unbemerkt geblieben: die App liefe weiter, aber mit
+      # einem Secret, das im Repo steht, und jeder könnte sich Admin-Tokens ausstellen.
+      DATABASE_URL: postgresql://${DB_USER:?DB_USER fehlt in .env}:${DB_PASSWORD:?DB_PASSWORD fehlt in .env}@knora-db:5432/knora
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET fehlt in .env}
       PARSER_URL: http://parser:8000/parse
       PORT: 3000
       # YouTube-Transkript-Provider (Apify/Supadata) – von Hetzner-IPs ist YouTube gesperrt,
@@ -19,6 +23,15 @@ services:
       APIFY_API_KEY: ${APIFY_API_KEY:-}
       SUPADATA_API_KEY: ${SUPADATA_API_KEY:-}
     restart: unless-stopped
+    # /health führt ein `select 1` gegen die Datenbank aus (siehe src/index.ts):
+    # ein hängender Prozess, der den Port noch hält, oder eine weggebrochene
+    # DB-Verbindung fallen sonst nicht auf.
+    healthcheck:
+      test: ["CMD-SHELL", "bun -e \"const r = await fetch('http://localhost:3000/health'); process.exit(r.ok ? 0 : 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     # Große Uploads werden mehrfach in den RAM kopiert (parseBody → arrayBuffer → Blob).
     # Cap an den kleinen, geteilten Prod-Host (3,7 GB, ~15 weitere Apps) angepasst:
     # im Zweifel fällt nur dieser Container (kontrollierter OOM-Restart), nicht der Server.
@@ -51,8 +64,9 @@ services:
     profiles:
       - tools
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-knora}:${DB_PASSWORD:-changeme}@knora-db:5432/knora
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      # Siehe app-Service: Pflichtvariablen, kein stiller Default.
+      DATABASE_URL: postgresql://${DB_USER:?DB_USER fehlt in .env}:${DB_PASSWORD:?DB_PASSWORD fehlt in .env}@knora-db:5432/knora
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET fehlt in .env}
       PARSER_URL: http://parser:8000/parse
       YOUTUBE_TRANSCRIPT_PROVIDER: ${YOUTUBE_TRANSCRIPT_PROVIDER:-}
       APIFY_API_KEY: ${APIFY_API_KEY:-}
@@ -83,6 +97,18 @@ services:
       app:
         condition: service_started
     restart: unless-stopped
+    # Gegen die ausgelieferte SPA, nicht gegen /health – letzteres proxyt nginx
+    # an den app-Container weiter und würde hier dessen Zustand messen.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/index.html >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Statisches nginx-Frontend: der laufende Verbrauch liegt bei ~1,5 MB. Der
+    # Deckel ist trotzdem gesetzt, damit im Fehlerfall dieser Container neu
+    # startet, statt dass der OOM-Killer sich einen Nachbarn aussucht.
+    mem_limit: 128m
     networks:
       - appnet
       - hetzner-network
@@ -106,6 +132,15 @@ services:
     environment:
       PORT: 8000
     restart: unless-stopped
+    # Im Parser-Image liegt weder curl noch wget – Python ist ohnehin da.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=4).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     # MarkItDown/pdfminer lädt das komplette PDF in den RAM. Cap an den kleinen,
     # geteilten Prod-Host angepasst (3,7 GB total). ACHTUNG: reicht für kleine/mittlere
     # PDFs, NICHT für tausende Seiten – solche Riesen-Docs sprengen diese Hardware
