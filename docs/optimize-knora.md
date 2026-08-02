@@ -61,7 +61,21 @@ indexierbar und der Planner kann sie zu einem BitmapOr verbinden. Der
 LIKE-Zweig bleibt erhalten — er ist für Kürzel wie „FG36" und Slug-Fragmente
 gewollt, die `websearch_to_tsquery` nicht findet.
 
-**Nachgemessen nach der Umsetzung:** siehe [Verifikation](#verifikation).
+**Nachgemessen nach der Umsetzung.** Der Plan kippt wie erhofft — statt eines
+Filters steht dort jetzt ein `BitmapOr` über **beide** Indexe:
+
+```
+Bitmap Heap Scan on wiki_pages
+  ->  BitmapAnd
+        ->  Bitmap Index Scan on wiki_pages_parent_idx        (workspace_id)
+        ->  BitmapOr
+              ->  Bitmap Index Scan on wiki_pages_fts_idx          (Volltext)
+              ->  Bitmap Index Scan on wiki_pages_title_trgm_idx   (ILIKE)
+```
+
+| | vorher | nachher (kalt) | nachher (warm) |
+|---|---|---|---|
+| Ausführungszeit | 1.200 ms | 10,0 ms | **1,45 ms** |
 
 ---
 
@@ -147,6 +161,21 @@ page_metadata @> '{"flags":["widerspruch"]}'     Bitmap Index Scan         0,4 m
 **Maßnahme.** Schreibweise in `service/wiki.ts` umgestellt. Kein neuer Index
 nötig. Die bisherige Eigenschaft bleibt erhalten: je Marker ein eigener
 `@>`-Vergleich mit echtem Query-Parameter, keine Interpolation in SQL.
+
+**Gegengeprüft auf Produktivdaten.** Beide Schreibweisen liefern für alle sieben
+tatsächlich vorkommenden Marker exakt dieselbe Treffermenge:
+
+| Marker | alt | neu |
+|---|---|---|
+| `datenluecke` | 259 | 259 |
+| `kommunikationsstrategie` | 218 | 218 |
+| `politischer_druck` | 149 | 149 |
+| `risikobewertung_geaendert` | 93 | 93 |
+| `massnahme_ohne_evidenz` | 88 | 88 |
+| `abweichung_von_who_ecdc` | 18 | 18 |
+| `abweichende_fachliche_position` | 15 | 15 |
+
+Laufzeit nach der Umstellung: **0,69 ms** per Bitmap Index Scan.
 
 Zum Vergleich: `out_links @> '["slug"]'` ein paar Zeilen weiter war bereits
 korrekt und nutzt seinen Index (0,5 ms) — unverändert gelassen.
@@ -249,10 +278,29 @@ unverändert übernommen. Die Sicherung unter `/var/backups/consolidation` ist
 Der Wiki-Bestand ist über Monate LLM-generiert. Ein Verlust wäre nicht durch
 Re-Import zu ersetzen, sondern nur durch einen neuen Generierungslauf.
 
-**Maßnahme.** Tägliches `pg_dumpall` über alle vier Datenbanken, mit
-Plausibilitätsprüfung und Aufbewahrung. Details und Skript im Nachbarrepo
-(`optimize-hetzner`, Punkt 1) — hier steht nur, was für knora zählt: es gibt
-jetzt einen Stand von gestern.
+**Maßnahme.** `/usr/local/sbin/pg-shared-backup` (Mode `700`), täglich um 3:30
+über `/etc/cron.d/pg-shared-backup`. Das Skript bricht bei jedem Fehler ab,
+prüft die Größe gegen eine Untergrenze, testet das Archiv mit `gzip -t` und
+räumt alte Dumps erst auf, **nachdem** der neue validiert ist. Aufbewahrung
+14 Tage. Skript und Restore-Test liegen im Nachbarrepo unter
+`deploy/pg-shared/`.
+
+**Erster Lauf und Restore-Test am 2. August durchgeführt:**
+
+| | Wert |
+|---|---|
+| Dumpgröße (gepackt) | 484 MB — die Embedding-Vektoren dominieren |
+| Laufzeit | 1 min 37 s |
+| Restore in einen Wegwerf-Container | fehlerfrei |
+| Zeilenabgleich Live ↔ Restore | knora 77.028 · mediathek 78.207 · umami 381 · mathe_quiz 4 — **alle identisch** |
+
+Beim Restore-Test wird der HNSW-Vektorindex übersprungen: sein Aufbau kostet auf
+diesem Host Minuten und viel Speicher, und er ist ein abgeleitetes Artefakt —
+seit Migration `0009` aus dem Repo reproduzierbar. Getestet wird, ob die *Daten*
+vollständig und einspielbar sind.
+
+> **Platzbedarf beachten:** 484 MB × 14 Tage ≈ 6,8 GB. Bei aktuell 52 GB frei
+> unkritisch, aber es ist der größte einzelne Posten, der ab jetzt wächst.
 
 ---
 
@@ -325,4 +373,25 @@ ssh elmarhepp 'docker exec pg-shared psql -U knora -d knora -c "\d+ wiki_pages" 
 curl -s -o /dev/null -w "%{http_code}\n" https://openclaw.elmarhepp.de/
 ```
 
-Die Messergebnisse dieses Durchlaufs stehen im Abschnitt „Ergebnis" unten.
+## Ergebnis dieses Durchlaufs
+
+Nach dem Ausrollen am 2. August 2026 gemessen:
+
+| | vorher | nachher |
+|---|---|---|
+| Wiki-Suche (5.703 Seiten, „Maske") | 1.200 ms | **1,45 ms** warm · 10,0 ms kalt |
+| Auffälligkeiten-Facette | 11,7 ms Seq Scan | **0,69 ms** Bitmap Index Scan |
+| Genutzte Indexe auf `wiki_pages` | 4 von 7 | **6 von 8** |
+| Healthchecks | keine | app, frontend, parser je `healthy` |
+| `/health` | statisches `ok` | `{"status":"ok","db":"ok"}`, 503 bei DB-Ausfall |
+| Container ohne `mem_limit` | 1 (frontend) | 0 |
+| Default-Secrets als Fallback | 2 | 0 |
+| `.env`-Rechte | `644` | `600` |
+| knora unter fremder Domain erreichbar | ja (openclaw) | nein |
+| Datenbank-Backup | keins, nie eines gegeben | täglich, mit geprüftem Restore |
+| btree-Indexe per `amcheck` geprüft | nicht möglich (Extension fehlte) | 27, fehlerfrei |
+
+Die drei zuvor ungenutzten Indexe sind auf einen geschrumpft: `wiki_pages_fts_idx`
+und `wiki_pages_metadata_gin_idx` werden jetzt benutzt. `wiki_pages_out_links_gin_idx`
+bleibt bei `idx_scan = 0` — der Index ist korrekt geschrieben und funktioniert
+(0,5 ms), die Backlink-Facette wird nur selten aufgerufen.
