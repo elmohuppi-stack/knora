@@ -1,8 +1,9 @@
 # 🚀 Deployment auf Live (Hetzner)
 
 > **Ziel:** Knora auf dem Hetzner-Produktionsserver deployen.
-> **Domain:** [knora.elmarhepp.de](https://knora.elmarhepp.de) · API: `https://knora-api.elmarhepp.de`
-> **Server:** `knora.elmarhepp.de` (Hetzner CX?, IP via Spaceship-DNS)
+> **Domain:** [knora.elmarhepp.de](https://knora.elmarhepp.de) — die API läuft
+> unter demselben Namen auf `/api/`, es gibt **keine** eigene API-Subdomain.
+> **Server:** `knora.elmarhepp.de` (Hetzner, IP via Spaceship-DNS)
 
 ---
 
@@ -11,9 +12,8 @@
 - SSH-Zugang via `~/.ssh/config` unter dem Host `elmarhepp`
 - Docker & Docker Compose auf dem Server installiert
 - Nginx-Reverse-Proxy auf dem Server (für Subdomain-Routing)
-- DNS-Einträge bei Spaceship:
+- DNS-Eintrag bei Spaceship:
   - `knora.elmarhepp.de` → Server-IP
-  - `knora-api.elmarhepp.de` → Server-IP
 - Hetzner-Netzwerk `hetzner-network` muss auf dem Server existieren:
 
   ```bash
@@ -132,6 +132,14 @@ docker exec -i pg-shared psql -U "$DB_USER" -d knora < backend/drizzle/0004_poli
 # 0005 ist idempotent (IF NOT EXISTS) und enthält ein Backfill, das bereits
 # generierte Kapitel-Artikel an ihre Übersichtsseite hängt.
 docker exec -i pg-shared psql -U "$DB_USER" -d knora < backend/drizzle/0005_flowery_spyke.sql
+
+# 0008–0010 (2. August 2026). Alle drei sind idempotent bzw. wiederholbar:
+#   0008  Trigramm-Index, damit die Wiki-Suche ihren Volltextindex nutzt
+#   0009  HNSW-Vektorindex (auf dem Server bereits vorhanden → No-Op)
+#   0010  COLLATE "C" auf Slugs, E-Mail und Session-Token
+docker exec -i pg-shared psql -U "$DB_USER" -d knora < backend/drizzle/0008_wiki_search_trgm.sql
+docker exec -i pg-shared psql -U "$DB_USER" -d knora < backend/drizzle/0009_hnsw_index.sql
+docker exec -i pg-shared psql -U "$DB_USER" -d knora < backend/drizzle/0010_collate_c_identifiers.sql
 ```
 
 **Welche Migrationen fehlen?** Vorhandene Spalten/Tabellen prüfen, z. B.:
@@ -159,22 +167,27 @@ Nur die Migrationen einspielen, deren Objekte noch fehlen.
 Nach dem Deployment prüfen:
 
 ```bash
-# Backend-Health
-curl https://knora-api.elmarhepp.de/health
-# → {"status":"ok"}
+# Backend-Health (nginx im Frontend-Container reicht /health an app:3000 durch).
+# Der Endpunkt führt ein `select 1` gegen die Datenbank aus und antwortet mit
+# 503, wenn sie nicht erreichbar ist.
+curl https://knora.elmarhepp.de/health
+# → {"status":"ok","db":"ok"}
 
-# Oder direkt via localhost auf dem Server
-ssh elmarhepp
-curl http://127.0.0.1:3000/health
+# Container-Zustand (alle drei Dienste haben einen Healthcheck)
+ssh elmarhepp 'cd /var/www/knora && docker compose ps'
 ```
 
 ---
 
 ## 🌐 5. Nginx-Reverse-Proxy (Server-Konfiguration)
 
-Auf dem Hetzner-Server müssen zwei Nginx-Serverblöcke existieren (einmalig einrichten):
+Auf dem Server genügt **ein** Serverblock. Anders als die übrigen Apps auf dem
+Host exponiert knora keinen API-Port: der `app`-Container ist nur im
+Docker-Netz erreichbar, und der nginx **im Frontend-Container** leitet `/api/`
+und `/health` intern an `app:3000` weiter (siehe `frontend/nginx.conf`). Eine
+Subdomain `knora-api.elmarhepp.de` gibt es deshalb nicht und hat nie existiert.
 
-### `knora.elmarhepp.de` → Frontend (Port 3084)
+### `knora.elmarhepp.de` → Frontend-Container
 
 ```nginx
 server {
@@ -182,24 +195,7 @@ server {
     server_name knora.elmarhepp.de;
 
     location / {
-        proxy_pass http://127.0.0.1:3084;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-### `knora-api.elmarhepp.de` → Backend (Port 3000)
-
-```nginx
-server {
-    listen 80;
-    server_name knora-api.elmarhepp.de;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:3081;   # = FRONTEND_PORT aus der .env
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -213,18 +209,25 @@ server {
 }
 ```
 
+> **Portvergabe:** `FRONTEND_PORT` steht auf dem Server auf **3081**, nicht auf
+> dem Compose-Default 3084. Vor einer Änderung gegenprüfen, dass der neue Port
+> nicht schon belegt ist:
+> `ssh elmarhepp 'grep -rh proxy_pass /etc/nginx/sites-available/ | sort -u'` —
+> `sites-available`, nicht `sites-enabled`, denn eine deaktivierte Config kann
+> jederzeit wieder aktiviert werden.
+
 > **Tipp:** Für HTTPS via Let's Encrypt/Certbot die Blöcke erweitern.
 
 ---
 
 ## 🧩 6. Parser (optional)
 
-Der Python-Parser für PDF/DOCX wird standardmäßig **nicht** mitgestartet. Aktivieren mit:
+Der Python-Parser für PDF/DOCX läuft **immer mit** — das Profil-Gate wurde
+entfernt, weil `docker compose up -d --build` beim Deploy ihn sonst nicht
+startet und jeder PDF-Import abbricht. Er braucht keine gesonderte Aktivierung.
 
 ```bash
-ssh elmarhepp
-cd /var/www/knora
-docker compose --profile parser up -d --build parser
+ssh elmarhepp 'cd /var/www/knora && docker compose ps parser'
 ```
 
 ---
@@ -249,7 +252,8 @@ da der `app`-Container kein `drizzle-kit` enthält).
 | Problem                                  | Lösung                                                                                  |
 | ---------------------------------------- | --------------------------------------------------------------------------------------- |
 | `knora.elmarhepp.de` lädt nicht          | DNS prüfen, Nginx-Konfiguration prüfen, `docker compose ps` auf Server                  |
-| `knora-api.elmarhepp.de` antwortet nicht | Gleiche Prüfung + Health-Endpoint testen                                                |
+| `/api/…` antwortet nicht, Frontend lädt  | `app`-Container prüfen (`docker compose ps`, Healthcheck), dann `docker compose logs app` |
+| `/health` liefert 503                    | Datenbank nicht erreichbar – `docker ps` für `pg-shared`, Netz `hetzner-network` prüfen |
 | YouTube-Import schlägt fehl              | Provider-Konfiguration prüfen (Apify/Supadata); auf Hetzner geht direktes YouTube nicht |
 | LLM-Antworten kommen nicht               | `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` in `.env` prüfen                                  |
 | Datenbank-Fehler / fehlende Spalte/Tabelle | Migration fehlt – neue `.sql` via `psql` in den DB-Container spielen (Abschnitt 3)     |
@@ -271,20 +275,29 @@ docker compose restart app
 # Shell im Container
 docker compose exec app /bin/sh
 
-# Kompletter Reset (Daten bleiben dank Volume erhalten)
+# Kompletter Reset des App-Stacks
 docker compose down
 docker compose up -d
-
-# Datenbank-Volume löschen (Vorsicht! Alle Daten weg)
-docker compose down -v
 ```
+
+> **Zur Datenhaltung:** Die Datenbank gehört seit dem 1. August 2026 nicht mehr
+> zu diesem Stack, sondern zu `/var/www/pg-shared`. `docker compose down` hier
+> ist deshalb harmlos, und auch `down -v` löscht die knora-Daten **nicht** —
+> das Volume `knora_data` ist dort als `external: true` eingebunden, und
+> externe Volumes entfernt Compose nie. Umgekehrt gilt: ein
+> `docker compose down` in `/var/www/pg-shared` legt vier Apps gleichzeitig
+> lahm.
 
 ---
 
 ## 🔐 10. Sicherheit
 
-- `JWT_SECRET` mit `openssl rand -base64 32` generieren (nicht das Dev-Secret verwenden!)
+- `JWT_SECRET` mit `openssl rand -base64 32` generieren
 - `DB_PASSWORD` mit einem starken Passwort setzen
-- `.env` liegt **nur** auf dem Server, nicht im Repo
-- Die API ist nur über `https://knora-api.elmarhepp.de` erreichbar (Subdomain)
-- Interne Ports (3000, 3084) sind nur an `127.0.0.1` gebunden – kein direkter Zugriff von außen
+- `DB_USER`, `DB_PASSWORD` und `JWT_SECRET` sind in der Compose als
+  Pflichtvariablen deklariert (`${VAR:?…}`). Fehlt eine, bricht der Start ab,
+  statt still mit einem Default-Secret weiterzulaufen
+- `.env` liegt **nur** auf dem Server, nicht im Repo, und hat Mode `600` —
+  sie enthält DB-Passwort, JWT-Secret und die LLM-/Apify-Schlüssel
+- Nur der Frontend-Port ist auf dem Host gemappt, und der an `127.0.0.1`.
+  `app`, `parser` und die Datenbank sind ausschließlich im Docker-Netz erreichbar

@@ -45,5 +45,6 @@ ssh "$HOST" "
 "
 
 echo "✅ Deployed successfully!"
-echo "   Frontend: https://knora.elmarhepp.de"
-echo "   API:      https://knora-api.elmarhepp.de"
+echo "   App:    https://knora.elmarhepp.de"
+echo "   API:    https://knora.elmarhepp.de/api/v1/…  (das Frontend proxyt /api/ intern zu app:3000)"
+echo "   Health: https://knora.elmarhepp.de/health"
