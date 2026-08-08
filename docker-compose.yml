@@ -109,9 +109,19 @@ services:
     # Deckel ist trotzdem gesetzt, damit im Fehlerfall dieser Container neu
     # startet, statt dass der OOM-Killer sich einen Nachbarn aussucht.
     mem_limit: 128m
+    # NUR appnet, bewusst nicht hetzner-network. nginx im Container proxyt /api/
+    # an den Hostnamen "app" (frontend/nginx.conf) – und "app" ist der
+    # Service-Name, den Compose in JEDEM Netz als Alias setzt. Im geteilten
+    # hetzner-network hieß deshalb am 8. August auch wandervogel, sari und
+    # wetter "app": Docker-DNS lieferte alle vier IPs, nginx rotierte
+    # (resolver ... valid=10s) und knoras API-Calls landeten reihum in fremden
+    # Apps – 401 "Nicht angemeldet" aus wandervogel, 502 von den anderen.
+    # Ohne hetzner-network löst "app" nur noch in appnet auf und ist eindeutig.
+    # Das Frontend braucht das geteilte Netz für nichts: es spricht ausschließlich
+    # mit app, und von außen kommt es über 127.0.0.1:${FRONTEND_PORT} durch den
+    # Host-nginx.
     networks:
       - appnet
-      - hetzner-network
 
   # ACHTUNG: Hier stand der db-Service. Die Datenbank läuft seit der
   # Konsolidierung als eigener Stack unter /var/www/pg-shared und bedient auch
